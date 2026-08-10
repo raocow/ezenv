@@ -87,7 +87,13 @@ _devrig_ghswitch() {
 devrig() {
   command devrig "$@"
   local rc=$?
-  _devrig_ghswitch
+  # Guarded because this wrapper can outlive its hook. Tooling that snapshots
+  # and replays a shell's functions (Claude Code does exactly this) can
+  # restore `devrig` into a shell where _devrig_ghswitch was never defined,
+  # and then EVERY devrig call prints "command not found: _devrig_ghswitch"
+  # after its real output — seen for real. Missing hook just means no
+  # re-evaluation, which is the harmless outcome.
+  typeset -f _devrig_ghswitch >/dev/null 2>&1 && _devrig_ghswitch
   return $rc
 }
 
