@@ -1,4 +1,4 @@
-.TH DEVRIG 1 "2026" "devrig 0.6.0" "User Commands"
+.TH DEVRIG 1 "2026" "devrig 0.7.0" "User Commands"
 .SH NAME
 devrig \- opt-in dev environment helpers
 .SH SYNOPSIS
@@ -43,11 +43,6 @@ Report the resolved python/pip and the active virtualenv.
 Print the raw source line(s) for manual use or
 .BR eval .
 .TP
-.B account " <subcommand>"
-Tie directories to different git/ssh accounts. See
-.B ACCOUNTS
-below.
-.TP
 .B sleep " on|off|status"
 .B off
 runs
@@ -72,26 +67,6 @@ Override the rc file that enable/disable edit (default
 .TP
 .B DEVRIG_SHIM_DIR
 Override where pyf writes its python/pip shims.
-.TP
-.B DEVRIG_SSH_CONFIG
-Override the ssh config that
-.B account
-appends host aliases to (default
-.IR ~/.ssh/config ).
-.TP
-.B DEVRIG_GITCONFIG
-Override the git config that
-.B account
-appends
-.I includeIf
-stanzas to (default
-.IR ~/.gitconfig ).
-.TP
-.B DEVRIG_SSH_KEY_DIR
-Override where
-.B account
-generates keypairs (default
-.IR ~/.ssh ).
 .SH FEATURES
 .TP
 .B autovenv
@@ -138,147 +113,10 @@ Named
 rather than
 .B dotenv
 to avoid shadowing the python-dotenv CLI.
-.TP
-.B ghswitch
-On every
-.BR cd ,
-switch the GitHub CLI's
-.RB ( gh )
-active account to match whichever account (see
-.B ACCOUNTS
-below) is bound to the directory, provided that account has
-.B \-\-gh\-user
-set.
-.BR gh 's
-active account is a single setting shared by every terminal and session on
-the machine, so anything else using a different identity anywhere can
-silently flip it back; this corrects it each time you
-.B cd
-instead of leaving you to hit a confusing "Unauthorized" error and fix it by
-hand. Reads
-.BR gh 's
-own local config directly, so a plain
-.B cd
-elsewhere costs nothing \(em no network call unless the account actually
-needs to change.
-.PP
-An
-.B unbound
-directory binds itself, on evidence rather than a guess. The accounts differ
-precisely in which repositories they can reach, so this checks which of them
-can actually
-.B push
-to the directory's origin repository and binds that one, reporting what it
-did and how to change it. Push access
-.RB ( ADMIN / MAINTAIN / WRITE )
-specifically, not mere visibility: on a public repository every logged-in
-account gets
-.BR READ ,
-so a visibility check would match the wrong account \(em a public repository
-you do not own is never auto-bound. Nothing happens outside a GitHub
-repository, or when no account has push access. Each account is probed with
-its own token via
-.BR GH_TOKEN ,
-so probing never disturbs the active account. That probe costs a network
-call, so it is gated: unbound directories only, once per directory per shell
-session.
-.B "Not included in a bare or 'all'"
-.BR "devrig enable" :
-unlike the other three features, this is global cross-session state, not a
-local shell convenience, so it must be enabled by name.
-.SH ACCOUNTS
-Work split across more than one git host account \(em a personal one and an
-employer's, say \(em normally means remembering to set
-.I user.email
-per clone and juggling ssh keys by hand.
-.B devrig account
-wires that up once per account and then makes it automatic per directory: every
-repo under a bound directory commits as that account and reaches the host with
-that account's key.
-.PP
-Unlike the features above, nothing is sourced into your shell. Git reads
-.I includeIf
-from your git config and ssh reads the
-.I Host
-alias from your ssh config on their own, so this is persistent configuration
-plus a keypair. devrig only ever appends, wrapped in
-.I BEGIN/END
-sentinel comments, and never clobbers an existing key, host block, or identity
-file.
-.TP
-.B account add " <name> --email <email> [--name <git name>] [--host <host>] [--dir <path>] [--gh-user <username>]"
-Generate an ed25519 keypair, append a
-.RI Host " <host>-<name>"
-alias, and write an identity file holding the git
-.I user.name
-and
-.IR user.email .
-.I --name
-defaults to
-.IR <name> ,
-.I --host
-to
-.IR github.com .
-With
-.I --dir
-the directory is bound in the same step. With
-.I --gh-user
-the account is paired with a
-.B gh
-CLI login, for the
-.B ghswitch
-feature. Prints the public key to add to the host account.
-.TP
-.B account bind " <name> <dir>"
-Use that account's identity for
-.I <dir>
-and everything under it. The directory need not exist yet. If run from
-inside
-.I <dir>
-and the account has
-.B \-\-gh\-user
-set, the
-.B ghswitch
-effect applies immediately instead of waiting for the next
-.BR cd .
-.TP
-.B account list
-Show each account, its email, and the directories bound to it.
-.TP
-.B account key " <name>"
-Print the account's public key again \(em for pasting into the host, or for
-authorizing it against an SSO-enforcing organization.
-.TP
-.B account check
-Verify every account and binding still applies, and exit non-zero if not. This
-is the command worth running: a bound directory that is renamed or moved leaves
-its
-.I includeIf
-pointing at a path that no longer exists, so git silently falls back to your
-global identity and the wrong name lands on every commit with no error anywhere.
-Where a repository exists under a binding,
-.B check
-confirms end to end that git really does resolve the expected address. For any
-account with
-.B \-\-gh\-user
-set, also verifies that user is actually logged in to
-.BR gh .
-.PP
-Keys are generated without a passphrase: this is a convenience tool, and a
-passphrase would need agent plumbing on every clone. They are protected by file
-permissions only.
 .SH FILES
 .TP
 .I <prefix>/share/devrig/*.zsh
 The feature scripts you source.
-.TP
-.I ~/.gitconfig-<account>
-Per-account git identity, included from
-.I ~/.gitconfig
-for bound directories.
-.TP
-.I ~/.ssh/id_ed25519_<account>
-Per-account ssh key.
 .SH EXAMPLES
 Enable features, then reload the shell to apply:
 .PP
@@ -297,17 +135,6 @@ Check and undo:
 .RS
 devrig status                # what's enabled
 devrig disable pyf           # turn one off
-.RE
-.fi
-.PP
-Tie a directory to a second git account:
-.PP
-.nf
-.RS
-devrig account add work --email me@work.com --dir ~/code/work
-# paste the printed key into that host account, then:
-git clone git@github.com-work:acme/api.git ~/code/work/api
-devrig account check          # confirm it really applies
 .RE
 .fi
 .PP
