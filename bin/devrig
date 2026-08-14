@@ -29,7 +29,6 @@ Usage:
   devrig status                   Show which features are enabled
   devrig doctor                   Show current environment (python/pip/venv)
   devrig init [feature...]        Print the raw source line(s) — for eval or manual use
-  devrig account <cmd>            Tie directories to different git/ssh accounts
   devrig sleep on|off|status      Toggle 'sudo pmset -a disablesleep' (needs sudo)
   devrig version                  Print version
   devrig help                     Show this help
@@ -38,23 +37,13 @@ Features:
   autovenv       Auto-activate the nearest .venv when you cd into a repo
   pyf            Make bare 'python'/'pip' resolve to python3/pip3
   envup          Add an 'envup' command: export a .env into the current shell
-  ghswitch       Auto-switch gh's active account when you cd into a bound
-                 directory with a --gh-user (see 'account' below) — NOT part
-                 of 'all', enable it by name
   all            autovenv + pyf + envup (default when no feature is given)
 
-Accounts:
-  devrig account add <name> --email <email> [--name <git name>]
-                           [--host <host>] [--dir <path>] [--gh-user <user>]
-  devrig account bind <name> <dir>   Use <name>'s identity in <dir> and below
-  devrig account list                Show accounts and their bound directories
-  devrig account key <name>          Print the public key to paste into the host
-  devrig account check               Verify every binding still actually applies
+Per-directory git/ssh/GitHub accounts moved to gitplus — see 'git account'.
+Config written by 'devrig account' is still read there, so nothing to redo.
 
 Example:
   devrig enable autovenv      # then: exec zsh
-  devrig account add work --email me@work.com --dir ~/code/work --gh-user work-gh
-  devrig enable ghswitch      # then: exec zsh
   devrig sleep off            # keep the Mac awake (e.g. a long build/transfer)
   devrig sleep on             # ...then put it back
 EOF
@@ -76,18 +65,15 @@ feature_file() {
     autovenv) echo "autovenv.zsh" ;;
     pyf)      echo "pyf.zsh" ;;
     envup)   echo "envup.zsh" ;;
-    ghswitch) echo "ghswitch.zsh" ;;
     *)        return 1 ;;
   esac
 }
 
 # Echo the requested features, expanding 'all', defaulting to all when empty,
 # and normalizing legacy names ('py-fallback' -> 'pyf') to their canonical form.
-# ghswitch is deliberately NOT part of 'all' or the bare-enable default: unlike
-# the other three (purely local-shell conveniences), it flips gh's ACTIVE
-# ACCOUNT — a single setting shared by every terminal and session on the
-# machine — so it's a bigger behavioral commitment that should be opted into
-# by name, not turned on silently by a first-time `devrig enable`.
+# 'ghswitch' used to live here too; it moved to gitplus with the account
+# registry it depends on, and is sourced from there instead of being enabled
+# by name.
 expand_features() {
   if [ "$#" -eq 0 ]; then echo "autovenv pyf envup"; return; fi
   local f out=""
@@ -185,434 +171,6 @@ _editor_restore() {  # disable autovenv → offer to undo the defer
   esac
 }
 
-# --- Accounts: per-directory git/ssh identity -------------------------------
-# Unlike the features above, this is NOT a shell feature: nothing is sourced.
-# Git reads `includeIf` out of ~/.gitconfig and ssh reads the `Host` alias out
-# of ~/.ssh/config on their own, so the whole feature is persistent config plus
-# a keypair. That's why it gets its own `devrig account` verb rather than
-# enable/disable — the state is a registry of N accounts and their directory
-# bindings, not one on/off marker line.
-#
-# Two rules hold everywhere below:
-#   1. We only ever APPEND, wrapped in BEGIN/END sentinels. A botched regex
-#      rewrite of an ssh config can lock you out of every host you use, so we
-#      never rewrite in place — the sentinels are what make exact removal
-#      possible later.
-#   2. We never clobber. An existing key, ssh block, or identity file is left
-#      alone and reported, because all three are things you may have hand-tuned.
-
-SSH_CONFIG="${DEVRIG_SSH_CONFIG:-${EZENV_SSH_CONFIG:-$HOME/.ssh/config}}"
-GITCONFIG="${DEVRIG_GITCONFIG:-${EZENV_GITCONFIG:-$HOME/.gitconfig}}"
-KEY_DIR="${DEVRIG_SSH_KEY_DIR:-${EZENV_SSH_KEY_DIR:-$HOME/.ssh}}"
-
-# The name lands in a filename, an ssh Host alias, and a config path, so keep it
-# to characters that are safe and quote-free in all three.
-_acct_valid_name() {
-  case "$1" in
-    ""|*[!A-Za-z0-9._-]*) return 1 ;;
-  esac
-  return 0
-}
-
-_acct_key()      { echo "$KEY_DIR/id_ed25519_$1"; }
-# Identity file sits beside the gitconfig it's included from, so an DEVRIG_GITCONFIG
-# override (tests) keeps the whole set together instead of writing into real $HOME.
-_acct_identity() { echo "$(dirname "$GITCONFIG")/.gitconfig-$1"; }
-
-_acct_names() {  # every registered account, one per line
-  [ -f "$SSH_CONFIG" ] || return 0
-  sed -n 's/^# devrig:account:\([^ ]*\) BEGIN.*/\1/p' "$SSH_CONFIG"
-}
-
-_acct_binds() {  # "<name> <dir>" per binding
-  [ -f "$GITCONFIG" ] || return 0
-  sed -n 's/^# devrig:bind:\([^ ]*\) BEGIN \(.*\)$/\1 \2/p' "$GITCONFIG"
-}
-
-_acct_ghuser() {  # gh CLI username recorded for an account, empty if none
-  [ -f "$SSH_CONFIG" ] || return 0
-  sed -n "s/^# devrig:ghuser:$1 //p" "$SSH_CONFIG"
-}
-
-# Internal (not in `devrig help`): the gh username to activate for a
-# directory — the NEAREST bound account (longest matching bound dir wins,
-# same "current directory is authoritative" rule as autovenv) that has a
-# --gh-user recorded, or nothing if outside every bound scope or the nearest
-# one has none. Used by the ghswitch shell feature; also handy to call by
-# hand when checking why a directory isn't switching.
-acct_gh_for_dir() {
-  local target="${1:-$PWD}" best="" bestlen=-1 line n d
-  target="$(_acct_abspath "$target" 2>/dev/null)" || target="${1:-$PWD}"
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    n="${line%% *}"; d="${line#* }"
-    case "$target" in
-      "$d"|"$d"/*)
-        [ "${#d}" -gt "$bestlen" ] && { best="$n"; bestlen="${#d}"; }
-        ;;
-    esac
-  done <<EOF
-$(_acct_binds)
-EOF
-  [ -n "$best" ] && _acct_ghuser "$best"
-  return 0
-}
-
-# _acct_repo_slug <dir> — "owner/repo" for <dir>'s origin remote, if it's a
-# GitHub one. Handles every remote form in practice: https, scp-style
-# git@host:owner/repo, ssh://, with or without a trailing .git — including
-# devrig's OWN `github.com-<account>` ssh aliases, which are still github.com.
-# Fails (returns 1, prints nothing) for a non-git dir, no origin, or a
-# non-GitHub host.
-_acct_repo_slug() {
-  local dir="${1:-$PWD}" url u host path
-  url="$(git -C "$dir" remote get-url origin 2>/dev/null)" || return 1
-  [ -n "$url" ] || return 1
-  u="${url#*://}"          # drop scheme if present
-  u="${u#*@}"              # drop user@ if present
-  host="${u%%[:/]*}"
-  path="${u#*[:/]}"
-  path="${path%.git}"
-  case "$host" in github.com|github.com-*) ;; *) return 1 ;; esac
-  case "$path" in */*) ;; *) return 1 ;; esac
-  printf '%s\n' "$path"
-}
-
-# acct_access_for_dir <dir> [first] — devrig accounts (with a --gh-user set)
-# that have PUSH access to <dir>'s origin repo. This is the signal that
-# actually matters, and the reason this whole feature exists: the accounts
-# differ precisely in which repos they can reach, so "who can push here" is a
-# checkable fact rather than a guess. With `first`, stops at the first match.
-#
-# Checked per-account WITHOUT touching gh's global active account: each
-# account's own token is passed via GH_TOKEN for that one call, so probing
-# never disturbs whatever the rest of the machine is doing.
-#
-# PUSH access specifically, not mere visibility — on any PUBLIC repo every
-# logged-in account gets READ, so a visibility check would call every public
-# repo ambiguous. ADMIN/MAINTAIN/WRITE is what distinguishes "this is my
-# account for this repo" from "I can see it like anyone else".
-acct_access_for_dir() {
-  local dir="${1:-$PWD}" first_only="${2:-}"
-  local slug; slug="$(_acct_repo_slug "$dir")" || return 0
-  command -v gh >/dev/null 2>&1 || return 0
-  local n ghuser tok perm
-  while IFS= read -r n; do
-    [ -n "$n" ] || continue
-    ghuser="$(_acct_ghuser "$n")"
-    [ -n "$ghuser" ] || continue
-    tok="$(gh auth token --user "$ghuser" 2>/dev/null)" || continue
-    [ -n "$tok" ] || continue
-    perm="$(GH_TOKEN="$tok" gh repo view "$slug" --json viewerPermission \
-      --jq .viewerPermission 2>/dev/null)" || continue
-    case "$perm" in
-      ADMIN|MAINTAIN|WRITE)
-        echo "$n"
-        [ -n "$first_only" ] && return 0
-        ;;
-    esac
-  done <<EOF
-$(_acct_names)
-EOF
-  return 0
-}
-
-# Absolute PHYSICAL path, without requiring the directory to exist yet (you often
-# want to bind a directory you are about to clone into).
-#
-# The physical part matters: git resolves a repository's real path before testing
-# it against `gitdir:`, so a pattern containing a symlink never matches. On macOS
-# /tmp and /var are themselves symlinks (/private/tmp, /private/var), so binding
-# a path under either would silently never apply. Resolve what exists, keep the
-# rest as given.
-_acct_abspath() {
-  local p="${1%/}" tail=""
-  case "$p" in
-    /*) ;;
-     *) p="$PWD/$p" ;;
-  esac
-  # Walk up until we find a directory that exists, resolve it, re-append the rest.
-  while [ -n "$p" ] && [ ! -d "$p" ]; do
-    tail="${p##*/}${tail:+/$tail}"
-    p="${p%/*}"
-  done
-  [ -n "$p" ] || { echo "/$tail"; return; }
-  p="$(cd "$p" 2>/dev/null && pwd -P)" || return 1
-  echo "${p%/}${tail:+/$tail}"
-}
-
-acct_add() {
-  local name="${1:-}"; shift 2>/dev/null || true
-  local email="" gitname="" host="github.com" dir="" ghuser=""
-  if ! _acct_valid_name "$name"; then
-    echo "devrig: account name required (letters, digits, . _ - only)" >&2; return 2
-  fi
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --email)   email="${2:-}"; shift 2 || return 2 ;;
-      --name)    gitname="${2:-}"; shift 2 || return 2 ;;
-      --host)    host="${2:-}"; shift 2 || return 2 ;;
-      --dir)     dir="${2:-}"; shift 2 || return 2 ;;
-      --gh-user) ghuser="${2:-}"; shift 2 || return 2 ;;
-      *) echo "devrig: unknown option '$1'" >&2; return 2 ;;
-    esac
-  done
-  [ -n "$email" ] || { echo "devrig: --email is required" >&2; return 2; }
-  [ -n "$host" ]  || { echo "devrig: --host cannot be empty" >&2; return 2; }
-  gitname="${gitname:-$name}"
-
-  local key alias identity
-  key="$(_acct_key "$name")"; alias="$host-$name"; identity="$(_acct_identity "$name")"
-
-  # ssh refuses to use a key or config dir with loose permissions.
-  mkdir -p "$KEY_DIR" && chmod 700 "$KEY_DIR"
-  mkdir -p "$(dirname "$SSH_CONFIG")"
-
-  if [ -f "$key" ]; then
-    echo "reusing existing key: ${key/#$HOME/~}"
-  else
-    # No passphrase: this is a convenience tool and a passphrase would need agent
-    # plumbing on every clone. The key is protected by file permissions only.
-    ssh-keygen -t ed25519 -C "$name" -f "$key" -N "" -q
-    echo "created key: ${key/#$HOME/~}"
-  fi
-
-  if grep -qF "# devrig:account:$name BEGIN" "$SSH_CONFIG" 2>/dev/null; then
-    echo "ssh host alias already present: $alias"
-  else
-    touch "$SSH_CONFIG" && chmod 600 "$SSH_CONFIG"
-    {
-      echo ""
-      echo "# devrig:account:$name BEGIN"
-      echo "Host $alias"
-      echo "  HostName $host"
-      echo "  User git"
-      echo "  IdentityFile $key"
-      # Without IdentitiesOnly, ssh offers every key the agent holds and the
-      # wrong account can answer first.
-      echo "  IdentitiesOnly yes"
-      echo "  AddKeysToAgent yes"
-      # UseKeychain is a macOS-only keyword; elsewhere ssh errors on it.
-      [ "$(uname -s)" = Darwin ] && echo "  UseKeychain yes"
-      echo "# devrig:account:$name END"
-    } >> "$SSH_CONFIG"
-    echo "added ssh host alias: $alias"
-  fi
-
-  if [ -f "$identity" ]; then
-    echo "keeping existing identity file: ${identity/#$HOME/~}"
-  else
-    printf '[user]\n\tname = %s\n\temail = %s\n' "$gitname" "$email" > "$identity"
-    echo "wrote identity: ${identity/#$HOME/~}  ($gitname <$email>)"
-  fi
-
-  # --gh-user pairs this account with a `gh` CLI login (see the ghswitch
-  # feature) so a bound directory keeps the right gh identity active — gh's
-  # own "active account" is a single global setting shared by every terminal,
-  # so anything else using a different identity anywhere can flip it back.
-  # Idempotent-append like everything else here: never overwrites a
-  # different value already recorded, tells you how to change it by hand.
-  if [ -n "$ghuser" ]; then
-    local existing; existing="$(_acct_ghuser "$name")"
-    if [ "$existing" = "$ghuser" ]; then
-      echo "gh user already recorded: $ghuser"
-    elif [ -n "$existing" ]; then
-      echo "devrig: gh user already set to '$existing' for '$name' — edit the" >&2
-      echo "  # devrig:ghuser:$name line in $SSH_CONFIG by hand to change it" >&2
-    else
-      printf '# devrig:ghuser:%s %s\n' "$name" "$ghuser" >> "$SSH_CONFIG"
-      echo "recorded gh user: $ghuser"
-    fi
-  fi
-
-  [ -n "$dir" ] && acct_bind "$name" "$dir"
-
-  echo ""
-  echo "Add this key to the $host account '$name':"
-  echo ""
-  cat "$key.pub"
-  echo ""
-  echo "Then clone through the alias so the right key is used:"
-  echo "  git clone git@$alias:<owner>/<repo>.git <dir>"
-  echo ""
-  echo "If the org enforces SAML SSO, also click 'Configure SSO' next to the key"
-  echo "in its settings and authorize it for that org, or clones will be refused."
-  return 0
-}
-
-acct_bind() {
-  local name="${1:-}" dir="${2:-}"
-  if ! _acct_valid_name "$name"; then
-    echo "devrig: account name required" >&2; return 2
-  fi
-  [ -n "$dir" ] || { echo "devrig: directory required" >&2; return 2; }
-  local identity; identity="$(_acct_identity "$name")"
-  if [ ! -f "$identity" ]; then
-    echo "devrig: no such account '$name' (run: devrig account add $name --email ...)" >&2
-    return 1
-  fi
-  dir="$(_acct_abspath "$dir")"
-  if grep -qF "# devrig:bind:$name BEGIN $dir" "$GITCONFIG" 2>/dev/null; then
-    echo "already bound: $dir -> $name"; return 0
-  fi
-  touch "$GITCONFIG"
-  {
-    echo ""
-    echo "# devrig:bind:$name BEGIN $dir"
-    # The trailing slash is what makes this match the directory AND everything
-    # under it; without it git matches nothing useful.
-    echo "[includeIf \"gitdir:$dir/\"]"
-    printf '\tpath = %s\n' "$identity"
-    echo "# devrig:bind:$name END $dir"
-  } >> "$GITCONFIG"
-  echo "bound: ${dir/#$HOME/~} -> $name"
-  [ -d "$dir" ] || echo "  note: that directory does not exist yet; the binding" \
-                        "activates once you clone into it."
-
-  # Deliberately does NOT run `gh auth switch` to apply this immediately.
-  # That setting is global to the whole machine, so writing it here would
-  # yank the identity out from under every other terminal and agent session
-  # currently working as a different account. Applying the new binding to the
-  # shell you're standing in is the ghswitch feature's job, and it does it
-  # per-shell via GH_TOKEN (its `devrig` wrapper re-runs the hook right after
-  # this command returns, since a subprocess can't export into its parent).
-  return 0
-}
-
-acct_list() {
-  local names; names="$(_acct_names)"
-  if [ -z "$names" ]; then
-    echo "no accounts registered (devrig account add <name> --email <email>)"
-    return 0
-  fi
-  local n line d
-  while IFS= read -r n; do
-    [ -n "$n" ] || continue
-    local identity who="" ghuser
-    identity="$(_acct_identity "$n")"
-    [ -f "$identity" ] && who="$(sed -n 's/^[[:space:]]*email[[:space:]]*=[[:space:]]*//p' "$identity" | head -1)"
-    echo "$n${who:+  <$who>}"
-    ghuser="$(_acct_ghuser "$n")"
-    [ -n "$ghuser" ] && echo "    gh: $ghuser"
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      [ "${line%% *}" = "$n" ] || continue
-      d="${line#* }"
-      echo "    ${d/#$HOME/~}"
-    done <<EOF
-$(_acct_binds)
-EOF
-  done <<EOF
-$names
-EOF
-}
-
-acct_key() {
-  local name="${1:-}" key
-  _acct_valid_name "$name" || { echo "devrig: account name required" >&2; return 2; }
-  key="$(_acct_key "$name").pub"
-  [ -f "$key" ] || { echo "devrig: no public key for '$name' ($key)" >&2; return 1; }
-  cat "$key"
-}
-
-# The reason this feature is worth having. A bound directory that gets renamed
-# still looks fine — git silently falls back to your global identity and the
-# wrong name lands on every commit, with no error anywhere. `check` is what
-# turns that into something visible.
-acct_check() {
-  local problems=0 n identity key line d expect_email actual repo
-  local names; names="$(_acct_names)"
-  if [ -z "$names" ]; then echo "no accounts registered"; return 0; fi
-
-  while IFS= read -r n; do
-    [ -n "$n" ] || continue
-    echo "$n"
-    key="$(_acct_key "$n")"; identity="$(_acct_identity "$n")"
-    if [ -f "$key" ] && [ -f "$key.pub" ]; then
-      echo "  key      : ok (${key/#$HOME/~})"
-    else
-      echo "  key      : MISSING ($key)"; problems=$((problems + 1))
-    fi
-    if [ -f "$identity" ]; then
-      expect_email="$(sed -n 's/^[[:space:]]*email[[:space:]]*=[[:space:]]*//p' "$identity" | head -1)"
-      echo "  identity : ok <$expect_email>"
-    else
-      echo "  identity : MISSING ($identity)"; problems=$((problems + 1)); expect_email=""
-    fi
-
-    local ghuser; ghuser="$(_acct_ghuser "$n")"
-    if [ -n "$ghuser" ]; then
-      if ! command -v gh >/dev/null 2>&1; then
-        echo "  gh user  : $ghuser — can't verify (gh CLI not installed)"
-      elif gh auth status 2>&1 | grep -qF "account $ghuser"; then
-        echo "  gh user  : ok ($ghuser logged in)"
-      else
-        echo "  gh user  : NOT LOGGED IN as $ghuser (run: gh auth login --hostname github.com)"
-        problems=$((problems + 1))
-      fi
-    fi
-
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      [ "${line%% *}" = "$n" ] || continue
-      d="${line#* }"
-      if [ ! -d "$d" ]; then
-        # The rename/move case: the includeIf still points at a path that is
-        # no longer there, so nothing applies it and commits go out as you.
-        echo "  bind     : BROKEN ${d/#$HOME/~} (directory does not exist —"
-        echo "             renamed or moved? commits there use your global identity)"
-        problems=$((problems + 1)); continue
-      fi
-      # Prove it end-to-end where we can: includeIf only evaluates inside a
-      # repo, so find one at the bind root or one level down.
-      repo=""
-      if [ -d "$d/.git" ]; then repo="$d"
-      else
-        for cand in "$d"/*/.git; do
-          [ -d "$cand" ] && { repo="${cand%/.git}"; break; }
-        done
-      fi
-      if [ -z "$repo" ]; then
-        echo "  bind     : ok ${d/#$HOME/~} (no repo there yet to verify against)"
-      else
-        actual="$(git -C "$repo" config user.email 2>/dev/null || true)"
-        if [ -n "$expect_email" ] && [ "$actual" = "$expect_email" ]; then
-          echo "  bind     : ok ${d/#$HOME/~} (verified <$actual>)"
-        else
-          echo "  bind     : WRONG ${d/#$HOME/~} — git resolves <${actual:-none}>,"
-          echo "             expected <$expect_email>"
-          problems=$((problems + 1))
-        fi
-      fi
-    done <<EOF
-$(_acct_binds)
-EOF
-  done <<EOF
-$names
-EOF
-
-  echo ""
-  if [ "$problems" -eq 0 ]; then
-    echo "all good."
-  else
-    echo "$problems problem(s) found."
-    return 1
-  fi
-}
-
-cmd_account() {
-  case "${1:-list}" in
-    add)   shift; acct_add "$@" ;;
-    bind)  shift; acct_bind "$@" ;;
-    list)  shift 2>/dev/null || true; acct_list ;;
-    key)   shift; acct_key "$@" ;;
-    check) shift 2>/dev/null || true; acct_check ;;
-    # Internal, not in `devrig help` — used by the ghswitch shell feature.
-    _gh-for-dir) shift; acct_gh_for_dir "$@" ;;
-    _access-for-dir) shift; acct_access_for_dir "$@" ;;
-    *) echo "devrig: unknown account command '$1' (add, bind, list, key, check)" >&2; return 2 ;;
-  esac
-}
 
 cmd_enable() {
   local sd; sd="$(share_dir)"
@@ -620,7 +178,7 @@ cmd_enable() {
   local changed=0 f file marker feats; feats="$(expand_features "$@")"
   for f in $feats; do
     if ! file="$(feature_file "$f")"; then
-      echo "devrig: unknown feature '$f' (try: autovenv, pyf, envup, ghswitch, all)" >&2; continue
+      echo "devrig: unknown feature '$f' (try: autovenv, pyf, envup, all)" >&2; continue
     fi
     if feature_enabled "$f"; then
       echo "already enabled: $f"
@@ -642,7 +200,7 @@ cmd_disable() {
   # Require an explicit feature, so a bare `devrig disable` can't wipe everything
   # by accident. Use `devrig disable all` to turn them all off.
   if [ "$#" -eq 0 ]; then
-    echo "devrig: pick a feature to disable: autovenv, pyf, envup, ghswitch (or 'all')" >&2
+    echo "devrig: pick a feature to disable: autovenv, pyf, envup (or 'all')" >&2
     return 2
   fi
   [ -f "$RC" ] || { echo "nothing to do (no $RC)"; return 0; }
@@ -690,25 +248,22 @@ cmd_disable() {
 cmd_status() {
   echo "rc file : $RC"
   local f
-  for f in autovenv pyf envup ghswitch; do
+  for f in autovenv pyf envup; do
     if feature_enabled "$f"; then
       echo "  $f : enabled"
     else
       echo "  $f : disabled"
     fi
   done
-  # Accounts aren't features (nothing is sourced), but they're state devrig owns,
-  # so status should not pretend they don't exist.
-  local names; names="$(_acct_names)"
-  if [ -n "$names" ]; then
-    echo "accounts:"
-    local n
-    while IFS= read -r n; do
-      [ -n "$n" ] && echo "  $n : $(_acct_binds | grep -c "^$n ") binding(s)"
-    done <<EOF
-$names
-EOF
-    echo "  (devrig account check verifies they still apply)"
+  # Per-directory git/ssh/GitHub accounts used to live here as `devrig
+  # account`. They moved to gitplus as `git account`, because every git-*
+  # command needs to resolve the bound account before calling gh — so the
+  # registry belongs with the git tooling, not a shell-helper package.
+  # Existing config keeps working: `git account` reads the sentinels this
+  # wrote. Mentioned here rather than dropped silently, since `devrig status`
+  # used to list accounts and someone will wonder where they went.
+  if command -v git-account >/dev/null 2>&1 && [ -n "$(git-account list 2>/dev/null | head -1)" ]; then
+    echo "accounts: moved to gitplus — see 'git account list'"
   fi
 }
 
@@ -753,7 +308,7 @@ cmd_init() {
   local f file
   for f in $(expand_features "$@"); do
     if ! file="$(feature_file "$f")"; then
-      echo "devrig: unknown feature '$f' (try: autovenv, pyf, envup, ghswitch, all)" >&2; return 1
+      echo "devrig: unknown feature '$f' (try: autovenv, pyf, envup, all)" >&2; return 1
     fi
     printf 'source "%s/%s"\n' "$sd" "$file"
   done
