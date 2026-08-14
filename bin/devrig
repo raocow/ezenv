@@ -320,7 +320,14 @@ case "${1:-help}" in
   status)               cmd_status ;;
   doctor)               cmd_doctor ;;
   init)                 shift; cmd_init "$@" ;;
-  account|accounts)     shift; cmd_account "$@" ;;
+  # Kept as a signpost rather than removed: anyone with the old command in
+  # muscle memory or a script deserves to be told where it went, not a bare
+  # usage dump. Forwards the arguments so the suggestion is runnable as-is.
+  account|accounts)
+    shift
+    echo "devrig: accounts moved to gitplus — run: git account${*:+ $*}" >&2
+    echo "  (your existing accounts and bindings still work there, unchanged)" >&2
+    exit 1 ;;
   sleep)                shift; cmd_sleep "$@" ;;
   version|--version|-v) echo "devrig $VERSION" ;;
   help|--help|-h)       usage ;;
