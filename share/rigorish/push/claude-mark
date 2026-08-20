@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Claude Code UserPromptSubmit hook — records when this session became busy,
+# so claude-stop can tell a long turn from a quick one.
+set -uo pipefail
+sid="$(/usr/bin/perl -MJSON::PP -e '
+  local $/; my $d = eval { decode_json(<STDIN>) } || {};
+  print $d->{session_id} // "unknown";' 2>/dev/null || echo unknown)"
+[ -n "$sid" ] || sid=unknown
+dir="${TMPDIR:-/tmp}/rigorish-push"
+mkdir -p "$dir" 2>/dev/null || true
+date +%s > "$dir/$sid" 2>/dev/null || true
+exit 0

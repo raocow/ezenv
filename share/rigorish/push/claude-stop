@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Claude Code Stop hook — push the closing message, but only for a turn long
+# enough that you probably walked away from it.
+set -uo pipefail
+HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/common.sh"
+push_load || exit 0
+
+input="$(cat)"
+# IFS is the tab alone: the perl call below emits tab-separated fields, and
+# the default IFS would also split them on spaces, truncating any value that
+# contains one — a project path very often does.
+IFS=$'\t' read -r sid cwd transcript <<<"$(printf '%s' "$input" | /usr/bin/perl -MJSON::PP -e '
+  local $/; my $d = eval { decode_json(<STDIN>) } || {};
+  # Tab-separated: these three never contain a tab in practice, and it keeps
+  # the hook to a single perl call.
+  printf "%s\t%s\t%s", $d->{session_id} // "unknown",
+                       $d->{cwd} // "", $d->{transcript_path} // "";' 2>/dev/null)"
+[ -n "${sid:-}" ] || sid=unknown
+
+dir="${TMPDIR:-/tmp}/rigorish-push"
+start="$(cat "$dir/$sid" 2>/dev/null || echo 0)"
+rm -f "$dir/$sid" 2>/dev/null || true
+case "$start" in ''|*[!0-9]*) start=0 ;; esac
+if [ "$start" -gt 0 ] && [ "$(( $(date +%s) - start ))" -lt "$RIGORISH_PUSH_MIN_SECONDS" ]; then
+  exit 0
+fi
+
+msg=""
+if [ -n "${transcript:-}" ] && [ -r "$transcript" ]; then
+  # Last text block of the last assistant entry. Tail-limited so a long
+  # transcript does not turn every Stop into a full-file parse.
+  msg="$(tail -n 60 "$transcript" 2>/dev/null | /usr/bin/perl -MJSON::PP -ne '
+    my $d = eval { decode_json($_) } or next;
+    next unless ($d->{type} // "") eq "assistant";
+    my $c = $d->{message}{content};
+    next unless ref $c eq "ARRAY";
+    for my $b (@$c) {
+      $last = $b->{text} if ref $b eq "HASH" && ($b->{type} // "") eq "text";
+    }
+    END { binmode(STDOUT, ":utf8"); print $last // "" }' 2>/dev/null)"
+fi
+[ -n "$msg" ] || msg="Turn finished."
+
+label="Claude Code"
+[ -n "${cwd:-}" ] && label="Claude Code — $(basename "$cwd")"
+"$HERE/send" "$label" "$msg" default white_check_mark || true
+exit 0

@@ -57,6 +57,39 @@ needed for
 .BR status ).
 A memorable name for a command whose flag/argument order is easy to forget.
 .TP
+.B push " setup|status|test|off"
+Notify your phone when a Claude Code or Codex turn ends, over
+.BR ntfy (https://ntfy.sh).
+.B setup
+wires this machine and prints the topic to subscribe to; pass
+.B \-\-topic
+to join the topic your other machines already use,
+.B \-\-device
+to label this one, and
+.B \-\-server
+to use your own ntfy instance.
+.B status
+reports what is wired and masks the topic unless given
+.BR \-\-show ;
+.B test
+sends one notification and reads it back to prove delivery;
+.B off
+unwires and restores what was there before. Both
+.B setup
+and
+.B off
+back up every file they edit
+.RB ( .rigorish-bak )
+and are safe to re-run. Claude Code notifies at the end of a turn and whenever
+it is blocked on you; Codex notifies at the end of a turn. Turns shorter than
+.B RIGORISH_PUSH_MIN_SECONDS
+stay quiet. Codex permits a single
+.B notify
+program, so if one is already configured \(em the ChatGPT desktop app installs
+its own \(em rigorish parks that command and replays it before pushing, and
+.B off
+hands the slot back.
+.TP
 .B version
 Print the version.
 .SH ENVIRONMENT
@@ -67,6 +100,22 @@ Override the rc file that enable/disable edit (default
 .TP
 .B RIGORISH_SHIM_DIR
 Override where pyf writes its python/pip shims.
+.TP
+.B RIGORISH_PUSH_ENV
+Override the push config file (default
+.IR ~/.config/rigorish/push.env ).
+.TP
+.B RIGORISH_PUSH_CLAUDE_SETTINGS
+Override the Claude Code settings file that
+.B push
+edits (default
+.IR ~/.claude/settings.json ).
+.TP
+.B RIGORISH_PUSH_CODEX_CONF
+Override the Codex config file that
+.B push
+edits (default
+.IR ~/.codex/config.toml ).
 .SH FEATURES
 .TP
 .B autovenv
@@ -117,6 +166,15 @@ to avoid shadowing the python-dotenv CLI.
 .TP
 .I <prefix>/share/rigorish/*.zsh
 The feature scripts you source.
+.TP
+.I <prefix>/share/rigorish/push/
+The notification transport and the agent hook scripts that
+.B push
+points Claude Code and Codex at.
+.TP
+.I ~/.config/rigorish/push.env
+Push config, mode 600. On public ntfy.sh the topic name in it is the only thing
+protecting the feed.
 .SH EXAMPLES
 Enable features, then reload the shell to apply:
 .PP
@@ -148,5 +206,16 @@ source "$(brew --prefix)/share/rigorish/autovenv.zsh"
 source "$(brew --prefix)/share/rigorish/pyf.zsh"
 .RE
 .fi
+.PP
+Notify your phone when an agent turn ends, on this machine and then a second one:
+.PP
+.nf
+.RS
+rigorish push setup                       # prints the topic to subscribe to
+rigorish push test                        # confirm it arrives
+rigorish push setup --topic TOPIC --device mini   # on the next machine
+.RE
+.fi
 .SH SEE ALSO
-.BR brew (1)
+.BR brew (1),
+.BR curl (1)

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Claude Code Notification hook — Claude is blocked on a permission or on your
+# input. No duration guard here: being blocked is always worth the interruption.
+set -uo pipefail
+HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+input="$(cat)"
+# IFS is the tab alone: the perl call below emits tab-separated fields, and
+# the default IFS would also split them on spaces, truncating any value that
+# contains one — a project path very often does.
+IFS=$'\t' read -r msg cwd <<<"$(printf '%s' "$input" | /usr/bin/perl -MJSON::PP -e '
+  local $/; my $d = eval { decode_json(<STDIN>) } || {};
+  binmode(STDOUT, ":utf8");
+  my $m = $d->{message} // "Claude Code needs you.";
+  $m =~ s/[\t\r\n]+/ /g;
+  printf "%s\t%s", $m, $d->{cwd} // "";' 2>/dev/null)"
+[ -n "${msg:-}" ] || msg="Claude Code needs you."
+label="Claude Code"
+[ -n "${cwd:-}" ] && label="Claude Code — $(basename "$cwd")"
+"$HERE/send" "$label" "$msg" high bell || true
+exit 0

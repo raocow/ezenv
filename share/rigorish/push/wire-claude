@@ -1,0 +1,78 @@
+#!/usr/bin/env perl
+# rigorish push: add or remove the Claude Code hooks in settings.json.
+#
+#   wire-claude on  <push-dir> <settings.json>
+#   wire-claude off             <settings.json>
+#
+# The file is decoded and re-encoded rather than patched textually, because a
+# hooks block is nested three deep and a regex over it would be guesswork.
+# Keys come back in canonical order, so expect a one-time reordering diff.
+use strict;
+use warnings;
+use JSON::PP;
+
+my ($mode, @rest) = @ARGV;
+die "usage: wire-claude on <push-dir> <settings> | off <settings>\n"
+  unless defined $mode && ($mode eq 'on' || $mode eq 'off');
+my ($dir, $path);
+if ($mode eq 'on') { ($dir, $path) = @rest } else { ($path) = @rest }
+die "wire-claude: missing arguments\n" unless defined $path && ($mode eq 'off' || defined $dir);
+
+my $json = JSON::PP->new->pretty->canonical;
+my $data = {};
+if (-s $path) {
+  open my $fh, '<', $path or die "wire-claude: cannot read $path: $!\n";
+  local $/; my $raw = <$fh>; close $fh;
+  $data = eval { $json->decode($raw) };
+  die "wire-claude: $path is not valid JSON, refusing to touch it\n" unless ref $data eq 'HASH';
+}
+
+# An entry is ours if any command in it points at this feature's scripts. The
+# standalone installer that predated the feature used phone-push-*.sh names, so
+# those are claimed too and a migrating machine ends up with one copy, not two.
+sub ours {
+  my ($entry) = @_;
+  return 0 unless ref $entry eq 'HASH' && ref $entry->{hooks} eq 'ARRAY';
+  for my $h (@{ $entry->{hooks} }) {
+    next unless ref $h eq 'HASH';
+    my $c = $h->{command} // '';
+    return 1 if $c =~ m{rigorish/push/claude-} || $c =~ m{phone-push-};
+  }
+  return 0;
+}
+
+my @events = qw(UserPromptSubmit Stop Notification);
+my $hooks = ref $data->{hooks} eq 'HASH' ? $data->{hooks} : {};
+
+# Always strip first, so `on` replaces rather than stacks and is safe to re-run.
+for my $e (@events) {
+  next unless ref $hooks->{$e} eq 'ARRAY';
+  $hooks->{$e} = [ grep { !ours($_) } @{ $hooks->{$e} } ];
+  delete $hooks->{$e} unless @{ $hooks->{$e} };
+}
+
+if ($mode eq 'on') {
+  my @spec = (
+    ['UserPromptSubmit', 'claude-mark',   undef,              10],
+    ['Stop',             'claude-stop',   'Pushing to phone', 15],
+    ['Notification',     'claude-notify', undef,              15],
+  );
+  for my $s (@spec) {
+    my ($event, $script, $status, $timeout) = @$s;
+    my $hook = {
+      type    => 'command',
+      command => qq{"$dir/$script"},   # quoted: the prefix path may contain spaces
+      shell   => 'bash',
+      timeout => $timeout,
+    };
+    $hook->{statusMessage} = $status if defined $status;
+    push @{ $hooks->{$event} }, { hooks => [$hook] };
+  }
+}
+
+if (%$hooks) { $data->{hooks} = $hooks } else { delete $data->{hooks} }
+
+open my $out, '>', "$path.rigorish-tmp" or die "wire-claude: cannot write $path: $!\n";
+print $out $json->encode($data);
+close $out;
+rename "$path.rigorish-tmp", $path or die "wire-claude: cannot replace $path: $!\n";
