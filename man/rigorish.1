@@ -1,12 +1,12 @@
-.TH DEVRIG 1 "2026" "devrig 0.7.0" "User Commands"
+.TH RIGORISH 1 "2026" "rigorish 0.8.0" "User Commands"
 .SH NAME
-devrig \- opt-in dev environment helpers
+rigorish \- opt-in dev environment helpers
 .SH SYNOPSIS
-.B devrig
+.B rigorish
 .I command
 .RI [ feature ...]
 .SH DESCRIPTION
-.B devrig
+.B rigorish
 bundles small, independently enabled zsh helpers. Each feature is a script
 you source from your
 .IR ~/.zshrc ;
@@ -61,11 +61,11 @@ A memorable name for a command whose flag/argument order is easy to forget.
 Print the version.
 .SH ENVIRONMENT
 .TP
-.B DEVRIG_RC
+.B RIGORISH_RC
 Override the rc file that enable/disable edit (default
 .IR ~/.zshrc ).
 .TP
-.B DEVRIG_SHIM_DIR
+.B RIGORISH_SHIM_DIR
 Override where pyf writes its python/pip shims.
 .SH FEATURES
 .TP
@@ -77,14 +77,14 @@ The current directory wins: leaving every
 .I .venv
 scope deactivates whatever is active, including a venv activated by your editor.
 On
-.BR "devrig enable autovenv" ,
+.BR "rigorish enable autovenv" ,
 it offers (with a prompt) to disable VSCode/Cursor's own terminal venv
 auto-activation
 .RB ( python.terminal.activateEnvironment )
 in your user settings, so autovenv is the sole venv manager;
-.B "devrig disable autovenv"
+.B "rigorish disable autovenv"
 offers to undo it. Those edits are backed up alongside the file
-.RB ( .devrig-bak ).
+.RB ( .rigorish-bak ).
 .TP
 .B pyf
 Create shims so bare
@@ -106,7 +106,7 @@ loads
 a specific one. Shorthand for
 .BR "set -a; source <file>; set +a" .
 It is a sourced function rather than an
-.B devrig
+.B rigorish
 subcommand because a subprocess cannot export variables back into your shell.
 Named
 .B envup
@@ -115,16 +115,16 @@ rather than
 to avoid shadowing the python-dotenv CLI.
 .SH FILES
 .TP
-.I <prefix>/share/devrig/*.zsh
+.I <prefix>/share/rigorish/*.zsh
 The feature scripts you source.
 .SH EXAMPLES
 Enable features, then reload the shell to apply:
 .PP
 .nf
 .RS
-devrig enable autovenv       # per-repo .venv auto-activation
-devrig enable pyf            # bare python/pip -> python3/pip3
-devrig enable                # everything
+rigorish enable autovenv       # per-repo .venv auto-activation
+rigorish enable pyf            # bare python/pip -> python3/pip3
+rigorish enable                # everything
 exec zsh                    # apply to the current shell
 .RE
 .fi
@@ -133,8 +133,8 @@ Check and undo:
 .PP
 .nf
 .RS
-devrig status                # what's enabled
-devrig disable pyf           # turn one off
+rigorish status                # what's enabled
+rigorish disable pyf           # turn one off
 .RE
 .fi
 .PP
@@ -144,8 +144,8 @@ edit):
 .PP
 .nf
 .RS
-source "$(brew --prefix)/share/devrig/autovenv.zsh"
-source "$(brew --prefix)/share/devrig/pyf.zsh"
+source "$(brew --prefix)/share/rigorish/autovenv.zsh"
+source "$(brew --prefix)/share/rigorish/pyf.zsh"
 .RE
 .fi
 .SH SEE ALSO
