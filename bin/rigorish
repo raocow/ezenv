@@ -28,6 +28,7 @@ Usage:
   rigorish doctor                   Show current environment (python/pip/venv)
   rigorish init [feature...]        Print the raw source line(s) — for eval or manual use
   rigorish sleep on|off|status      Toggle 'sudo pmset -a disablesleep' (needs sudo)
+  rigorish push <subcommand>        Agent turn notifications on your phone
   rigorish version                  Print version
   rigorish help                     Show this help
 
@@ -40,10 +41,17 @@ Features:
 Per-directory git/ssh/GitHub accounts moved to gitplus — see 'git account'.
 Config written by 'devrig account' is still read there, so nothing to redo.
 
+Push subcommands:
+  push setup [--topic T] [--device NAME] [--server URL]   Wire this machine
+  push status [--show]            What is wired, and where
+  push test [message]             Send one notification and read it back
+  push off                        Unwire, restoring what was there before
+
 Example:
   rigorish enable autovenv      # then: exec zsh
   rigorish sleep off            # keep the Mac awake (e.g. a long build/transfer)
   rigorish sleep on             # ...then put it back
+  rigorish push setup           # notify your phone when an agent turn ends
 EOF
 }
 
@@ -251,6 +259,11 @@ cmd_status() {
   if command -v git-account >/dev/null 2>&1 && [ -n "$(git-account list 2>/dev/null | head -1)" ]; then
     echo "accounts: moved to gitplus — see 'git account list'"
   fi
+  # push is not an rc feature, so it has no line above. Reported anyway: it
+  # changes what your phone does, and `rigorish status` is where you look.
+  if [ -f "$PUSH_CLAUDE" ] && grep -q 'rigorish/push/claude-' "$PUSH_CLAUDE" 2>/dev/null; then
+    echo "  push : wired — see 'rigorish push status'"
+  fi
 }
 
 cmd_doctor() {
@@ -289,6 +302,237 @@ cmd_sleep() {
   esac
 }
 
+# --- push -------------------------------------------------------------------
+# Claude Code and Codex both end a turn and then wait. If you walked away, you
+# find out when you come back. This wires each one's own notification hook to
+# an ntfy topic your phone subscribes to, so several machines report to one
+# subscription and each notification says which machine it came from.
+#
+# Not an `enable`-able feature: it writes no rc line. Like `sleep`, it reaches
+# outside the shell — into Claude Code's settings.json and Codex's config.toml
+# — so it is a one-off per machine rather than something a shell sources.
+#
+# All JSON and TOML editing is done in perl with core JSON::PP, deliberately.
+# jq would be the obvious tool and is not a dependency of this package; making
+# it one for a single optional feature would tax every install.
+PUSH_ENV_DEFAULT="$HOME/.config/rigorish/push.env"
+PUSH_CLAUDE="${RIGORISH_PUSH_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+PUSH_CODEX="${RIGORISH_PUSH_CODEX_CONF:-$HOME/.codex/config.toml}"
+
+push_dir() { echo "$(share_dir)/push"; }
+
+# Where config is read from: an explicit override, else the current location,
+# else the standalone installer's location that predated this feature.
+_push_conf_read() {
+  if [ -n "${RIGORISH_PUSH_ENV:-}" ]; then echo "$RIGORISH_PUSH_ENV"; return; fi
+  if [ -r "$PUSH_ENV_DEFAULT" ]; then echo "$PUSH_ENV_DEFAULT"; return; fi
+  if [ -r "$HOME/.config/phone-push.env" ]; then echo "$HOME/.config/phone-push.env"; return; fi
+  echo "$PUSH_ENV_DEFAULT"
+}
+_push_conf_write() { echo "${RIGORISH_PUSH_ENV:-$PUSH_ENV_DEFAULT}"; }
+_push_passthrough() { echo "$HOME/.config/rigorish/codex-passthrough"; }
+
+_push_backup() {  # keep a copy beside the file, the same way autovenv does
+  [ -f "$1" ] || return 0
+  cp "$1" "$1.rigorish-bak"
+}
+
+_push_load() {
+  local c; c="$(_push_conf_read)"
+  if [ -r "$c" ]; then
+    # shellcheck disable=SC1090
+    . "$c" 2>/dev/null || true
+  fi
+  NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"
+  RIGORISH_PUSH_DEVICE="${RIGORISH_PUSH_DEVICE:-${PHONE_PUSH_DEVICE:-$(hostname -s 2>/dev/null || echo host)}}"
+  RIGORISH_PUSH_MIN_SECONDS="${RIGORISH_PUSH_MIN_SECONDS:-${PHONE_PUSH_MIN_SECONDS:-60}}"
+}
+
+_push_setup() {
+  local topic="" device="" server=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --topic)  topic="${2:-}"; shift 2 ;;
+      --device) device="${2:-}"; shift 2 ;;
+      --server) server="${2:-}"; shift 2 ;;
+      *) echo "rigorish push setup: unknown option '$1'" >&2; return 2 ;;
+    esac
+  done
+
+  local pd; pd="$(push_dir)"
+  if [ ! -x "$pd/send" ]; then
+    echo "rigorish push: helper scripts not found in $pd" >&2
+    return 1
+  fi
+
+  # Read the existing config first, so a re-run never rotates the topic out
+  # from under devices already subscribed to it.
+  _push_load
+  [ -n "$topic" ]  && NTFY_TOPIC="$topic"
+  [ -n "$server" ] && NTFY_SERVER="$server"
+  [ -n "$device" ] && RIGORISH_PUSH_DEVICE="$device"
+  local fresh=0
+  if [ -z "${NTFY_TOPIC:-}" ]; then
+    local rand
+    rand="$(openssl rand -hex 6 2>/dev/null || uuidgen | tr -d - | cut -c1-12)"
+    NTFY_TOPIC="agents-$rand"
+    fresh=1
+  fi
+
+  local cw; cw="$(_push_conf_write)"
+  mkdir -p "$(dirname "$cw")"
+  cat > "$cw" <<CONF
+# rigorish push — written by 'rigorish push setup'. Keep this file private:
+# on public ntfy.sh the topic name is the only thing protecting the feed.
+NTFY_SERVER="$NTFY_SERVER"
+NTFY_TOPIC="$NTFY_TOPIC"
+# Shown in every notification title, so several machines stay distinguishable.
+RIGORISH_PUSH_DEVICE="$RIGORISH_PUSH_DEVICE"
+# Turns shorter than this do not notify — you had not walked away yet.
+RIGORISH_PUSH_MIN_SECONDS=$RIGORISH_PUSH_MIN_SECONDS
+CONF
+  chmod 600 "$cw"
+  echo "config    : ${cw/#$HOME/~}  (device \"$RIGORISH_PUSH_DEVICE\")"
+
+  # Claude Code: three hooks. UserPromptSubmit stamps the turn start, Stop
+  # pushes only past the threshold, Notification pushes whenever Claude is
+  # blocked on you and does not wait for the threshold.
+  mkdir -p "$(dirname "$PUSH_CLAUDE")"
+  _push_backup "$PUSH_CLAUDE"
+  if "$pd/wire-claude" on "$pd" "$PUSH_CLAUDE"; then
+    echo "claude    : 3 hooks wired in ${PUSH_CLAUDE/#$HOME/~}"
+  else
+    echo "claude    : failed to wire ${PUSH_CLAUDE/#$HOME/~}" >&2
+  fi
+
+  # Codex: one notify slot, and something else may already hold it — on a Mac
+  # with the ChatGPT app, its own desktop notifier does. wire-codex parks that
+  # argv and codex-notify replays it, so taking the slot costs nothing.
+  if [ -f "$PUSH_CODEX" ]; then
+    mkdir -p "$(dirname "$(_push_passthrough)")"
+    _push_backup "$PUSH_CODEX"
+    local r
+    if r="$("$pd/wire-codex" on "$pd/codex-notify" "$PUSH_CODEX" "$(_push_passthrough)")"; then
+      echo "codex     : notify slot taken — $r"
+    else
+      echo "codex     : failed to wire ${PUSH_CODEX/#$HOME/~}" >&2
+    fi
+  else
+    echo "codex     : not installed here, skipped"
+  fi
+
+  echo
+  echo "Subscribe your phone to topic '$NTFY_TOPIC' at $NTFY_SERVER (ntfy app)."
+  if [ "$fresh" = 1 ]; then
+    echo "On your other machines:  rigorish push setup --topic $NTFY_TOPIC"
+  fi
+  echo "Then check it end to end:  rigorish push test"
+}
+
+_push_status() {
+  local show=0
+  [ "${1:-}" = "--show" ] && show=1
+  _push_load
+  local c; c="$(_push_conf_read)"
+  if [ ! -r "$c" ] || [ -z "${NTFY_TOPIC:-}" ]; then
+    echo "not set up — run: rigorish push setup"
+    return 0
+  fi
+  echo "config    : ${c/#$HOME/~}"
+  if [ "$show" = 1 ]; then
+    echo "topic     : $NTFY_TOPIC"
+  else
+    # Masked by default: the topic is the credential, and status output ends up
+    # in screenshots. --show prints it for setting up the next device.
+    local keep=4 pad
+    [ "${#NTFY_TOPIC}" -lt 8 ] && keep=0        # too short to reveal any of it
+    pad=$(( ${#NTFY_TOPIC} - keep ))
+    echo "topic     : ${NTFY_TOPIC:0:$keep}$(printf '%*s' "$pad" '' | tr ' ' '*')  (--show to reveal)"
+  fi
+  echo "server    : $NTFY_SERVER"
+  echo "device    : $RIGORISH_PUSH_DEVICE"
+  echo "quiet under: ${RIGORISH_PUSH_MIN_SECONDS}s"
+  if [ -f "$PUSH_CLAUDE" ] && grep -q 'rigorish/push/claude-' "$PUSH_CLAUDE" 2>/dev/null; then
+    echo "claude    : wired"
+  else
+    echo "claude    : not wired"
+  fi
+  if [ -f "$PUSH_CODEX" ] && grep -q 'push/codex-notify' "$PUSH_CODEX" 2>/dev/null; then
+    local p; p="$(_push_passthrough)"
+    if [ -s "$p" ]; then
+      echo "codex     : wired, replaying $(head -1 "$p" | xargs basename 2>/dev/null || echo 'a previous notifier')"
+    else
+      echo "codex     : wired"
+    fi
+  elif [ -f "$PUSH_CODEX" ]; then
+    echo "codex     : not wired"
+  else
+    echo "codex     : not installed here"
+  fi
+}
+
+# Send one notification, then read the topic back. Delivery is the only thing
+# worth reporting here: `send` exits 0 even when nothing goes out, by design,
+# so its exit status proves nothing.
+_push_test() {
+  _push_load
+  if [ -z "${NTFY_TOPIC:-}" ]; then
+    echo "not set up — run: rigorish push setup" >&2
+    return 1
+  fi
+  local msg="${*:-rigorish push test}"
+  "$(push_dir)/send" "rigorish" "$msg" default bell
+  sleep 2
+  if curl -fsS --max-time 15 "${NTFY_SERVER%/}/${NTFY_TOPIC}/json?poll=1&since=1m" 2>/dev/null \
+       | grep -qF "$msg"; then
+    echo "delivered — the topic has it. If your phone stayed quiet, check the"
+    echo "ntfy app is subscribed to '$NTFY_TOPIC' and notifications are allowed."
+  else
+    echo "not delivered. Check network access to ${NTFY_SERVER}." >&2
+    return 1
+  fi
+}
+
+_push_off() {
+  local pd; pd="$(push_dir)"
+  if [ -f "$PUSH_CLAUDE" ]; then
+    _push_backup "$PUSH_CLAUDE"
+    "$pd/wire-claude" off "$PUSH_CLAUDE" && echo "claude    : hooks removed"
+  fi
+  if [ -f "$PUSH_CODEX" ] && grep -q 'push/codex-notify' "$PUSH_CODEX" 2>/dev/null; then
+    _push_backup "$PUSH_CODEX"
+    local r
+    r="$("$pd/wire-codex" off "$PUSH_CODEX" "$(_push_passthrough)")" \
+      && echo "codex     : $r"
+  fi
+  # The config file stays. It holds the topic, and deleting it would strand any
+  # other device still subscribed to it behind a topic nobody can recover.
+  echo "config    : kept at $(_push_conf_read | sed "s|^$HOME|~|") — delete it to forget the topic"
+}
+
+cmd_push() {
+  local sub="${1:-}"
+  [ "$#" -gt 0 ] && shift
+  case "$sub" in
+    setup)  _push_setup "$@" ;;
+    status) _push_status "$@" ;;
+    test)   _push_test "$@" ;;
+    off)    _push_off ;;
+    *)
+      cat >&2 <<'EOF'
+rigorish push: specify a subcommand
+
+  rigorish push setup [--topic T] [--device NAME] [--server URL]
+  rigorish push status [--show]
+  rigorish push test [message]
+  rigorish push off
+
+Notifies your phone when a Claude Code or Codex turn ends, via ntfy.
+EOF
+      return 1 ;;
+  esac
+}
+
 cmd_init() {
   local sd; sd="$(share_dir)"
   local f file
@@ -315,6 +559,7 @@ case "${1:-help}" in
     echo "  (your existing accounts and bindings still work there, unchanged)" >&2
     exit 1 ;;
   sleep)                shift; cmd_sleep "$@" ;;
+  push)                 shift; cmd_push "$@" ;;
   version|--version|-v) echo "rigorish $VERSION" ;;
   help|--help|-h)       usage ;;
   *)                    usage >&2; exit 1 ;;

@@ -28,6 +28,9 @@ exec zsh                     # apply to the current shell
 `rigorish doctor` shows the resolved python/pip/venv. (`install`/`uninstall` still
 work as aliases for `enable`/`disable`.)
 
+Two commands are not zsh features and touch nothing in your rc file:
+`rigorish push` (agent notifications on your phone) and `rigorish sleep`.
+
 <details>
 <summary>Manual / advanced</summary>
 
@@ -59,6 +62,49 @@ nothing to do with git, so only the git-shaped parts went — `ghswitch` with th
 
 **Nothing to redo.** `git account` reads the config this wrote, so existing
 accounts and bindings keep working untouched.
+
+## Push
+
+Notify your phone when a Claude Code or Codex turn ends, so you stop
+babysitting a terminal that is going to take four minutes.
+
+```bash
+rigorish push setup             # wire this machine, print the topic to subscribe to
+rigorish push test              # send one and confirm it arrived
+rigorish push status            # what's wired, and where
+rigorish push off               # unwire, restoring whatever was there before
+```
+
+Install the [ntfy](https://ntfy.sh) app on your phone and subscribe to the topic
+`setup` prints. On your other machines, join the same topic so one subscription
+covers all of them:
+
+```bash
+rigorish push setup --topic <the-topic> --device work-mini
+```
+
+Every notification is titled with the project and the machine
+(`Claude Code — myrepo @ work-mini`), so several machines stay legible in one
+feed. Claude Code notifies when a turn ends **and** whenever it is blocked
+waiting on you; Codex notifies when a turn ends. Turns shorter than 60 seconds
+stay quiet, on the theory that you had not walked away yet
+(`RIGORISH_PUSH_MIN_SECONDS` in `~/.config/rigorish/push.env`).
+
+**The topic name is the only thing protecting the feed on public ntfy.sh.** It
+lives in `~/.config/rigorish/push.env`, mode 600, and `rigorish push status` masks
+it unless you pass `--show`. Point `--server` at your own ntfy if you would
+rather not use the public one.
+
+`setup` edits Claude Code's `~/.claude/settings.json` and Codex's
+`~/.codex/config.toml`, backing each up first (`.rigorish-bak`). Codex allows one
+`notify` program, and on a Mac with the ChatGPT app installed its own desktop
+notifier already holds that slot — so rigorish parks that command and replays it
+before pushing, leaving desktop notifications working. `rigorish push off` hands
+the slot back. Both are safe to re-run: they replace their own entries instead
+of stacking new ones.
+
+Needs `curl` and `perl` (both already on macOS). Deliberately not `jq`, so the
+package stays dependency-free for everyone who does not use this feature.
 
 ## Sleep
 

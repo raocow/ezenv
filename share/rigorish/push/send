@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# rigorish push transport — one notification to the phone via ntfy.
+# Usage: send <title> <message> [priority] [tags]
+#
+# Always exits 0. This runs from agent hooks, and a notifier that fails must
+# not take the session down with it.
+set -uo pipefail
+. "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+push_load || exit 0
+
+# ntfy carries the title in an HTTP header, so it has to be one line.
+# head -c and not cut -c throughout: cut caps each line separately, so a
+# multi-line body sails through whole and can cross ntfy's 4096-byte limit,
+# where the push fails and curl -f hides it. iconv -c drops the partial
+# character that a byte-cut can leave behind.
+title="$(printf '%s @ %s' "${1:-Agent}" "$RIGORISH_PUSH_DEVICE" \
+  | tr -d '\r\n' | head -c 100 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)"
+
+# --data-binary @- rather than passing the body as an argument: curl reads a
+# FILE when the value starts with '@', so a message opening with one would
+# either fail or upload a local file.
+printf '%s' "${2:-done}" \
+  | head -c 400 \
+  | iconv -c -f UTF-8 -t UTF-8 2>/dev/null \
+  | curl -fsS --max-time 10 \
+      -H "Title: $title" \
+      -H "Priority: ${3:-default}" \
+      -H "Tags: ${4:-robot}" \
+      -H "Markdown: no" \
+      --data-binary @- \
+      "${NTFY_SERVER%/}/${NTFY_TOPIC}" >/dev/null 2>&1
+exit 0

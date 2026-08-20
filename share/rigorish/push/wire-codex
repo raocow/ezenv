@@ -1,0 +1,80 @@
+#!/usr/bin/env perl
+# rigorish push: take over, or hand back, the Codex `notify` slot.
+#
+#   wire-codex on  <wrapper> <config.toml> <passthrough>
+#   wire-codex off           <config.toml> <passthrough>
+#
+# Only the one `notify = [...]` line is rewritten; the rest of the TOML is
+# copied through untouched, so no TOML parser is needed and nothing else in the
+# file can be reformatted or lost.
+use strict;
+use warnings;
+use JSON::PP;
+
+my ($mode, @rest) = @ARGV;
+die "usage: wire-codex on <wrapper> <config> <passthrough> | off <config> <passthrough>\n"
+  unless defined $mode && ($mode eq 'on' || $mode eq 'off');
+my ($wrapper, $conf, $pass);
+if ($mode eq 'on') { ($wrapper, $conf, $pass) = @rest } else { ($conf, $pass) = @rest }
+
+my $json = JSON::PP->new;
+open my $fh, '<', $conf or die "wire-codex: cannot read $conf: $!\n";
+my @lines = <$fh>;
+close $fh;
+
+my ($idx, $existing);
+for my $i (0 .. $#lines) {
+  if ($lines[$i] =~ /^notify\s*=\s*(\[.*\])\s*$/) { $idx = $i; $existing = $1; last }
+}
+
+my $report = '';
+if ($mode eq 'on') {
+  # Park the previous notifier's argv, unless the slot is already ours — that
+  # check is the whole point. Capturing our own wrapper as its own parent would
+  # recurse, and the notifier it was meant to preserve would be lost for good.
+  if (defined $existing && index($existing, $wrapper) < 0) {
+    my $argv = eval { $json->decode($existing) };
+    if (ref $argv eq 'ARRAY' && @$argv) {
+      open my $p, '>', $pass or die "wire-codex: cannot write $pass: $!\n";
+      print $p "$_\n" for @$argv;
+      close $p;
+      $report = "parked the previous notifier";
+    }
+  } elsif (defined $existing) {
+    $report = "already ours, previous notifier left parked";
+  } else {
+    open my $p, '>', $pass or die "wire-codex: cannot write $pass: $!\n";
+    close $p;
+    $report = "no previous notifier";
+  }
+
+  # The array must hold the wrapper alone; codex-notify replays the parked argv
+  # and then appends its own arguments. Rewritten unconditionally so an array
+  # left with a stale extra entry is repaired rather than skipped.
+  my $want = 'notify = ' . $json->encode([$wrapper]) . "\n";
+  if (defined $idx) { $lines[$idx] = $want } else { unshift @lines, $want }
+} else {
+  my @argv;
+  if (-s $pass) {
+    open my $p, '<', $pass or die "wire-codex: cannot read $pass: $!\n";
+    while (my $l = <$p>) { chomp $l; push @argv, $l if length $l }
+    close $p;
+  }
+  if (defined $idx) {
+    if (@argv) {
+      $lines[$idx] = 'notify = ' . $json->encode(\@argv) . "\n";
+      $report = "handed the slot back";
+    } else {
+      splice @lines, $idx, 1;
+      $report = "removed the notify line";
+    }
+  } else {
+    $report = "nothing wired";
+  }
+}
+
+open my $out, '>', "$conf.rigorish-tmp" or die "wire-codex: cannot write $conf: $!\n";
+print $out @lines;
+close $out;
+rename "$conf.rigorish-tmp", $conf or die "wire-codex: cannot replace $conf: $!\n";
+print "$report\n";

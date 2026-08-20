@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Codex `notify` hook. Replays whatever notifier was configured before rigorish
+# took the slot — on a Mac with the ChatGPT app that is its desktop notifier,
+# which would otherwise go silent — then forwards the turn to the phone.
+#
+# Codex appends a JSON payload as the last argument. The notify array must hold
+# this script ALONE: the parked argv already carries the previous notifier's
+# static arguments, and they are replayed here, so any extra entry in the array
+# would reach the child twice.
+set -uo pipefail
+HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$HERE/common.sh"
+
+PASS="$(push_codex_passthrough)"
+if [ -s "$PASS" ]; then
+  argv=()
+  while IFS= read -r line; do argv+=("$line"); done < "$PASS"
+  if [ "${#argv[@]}" -gt 0 ] && [ -x "${argv[0]}" ]; then
+    "${argv[@]}" "$@" >/dev/null 2>&1 || true
+  fi
+fi
+
+msg="$(printf '%s' "${*: -1}" | /usr/bin/perl -MJSON::PP -e '
+  local $/; my $d = eval { decode_json(<STDIN>) } || {};
+  binmode(STDOUT, ":utf8");
+  print $d->{"last-assistant-message"} // $d->{last_assistant_message}
+        // $d->{message} // "";' 2>/dev/null || true)"
+[ -n "$msg" ] || msg="Turn ended."
+
+"$HERE/send" "Codex — $(basename "$PWD")" "$msg" default robot || true
+exit 0
