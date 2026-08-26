@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# rigorish — opt-in dev environment helpers.
+# rigor (formerly devrig, née ezenv) — opt-in dev environment helpers.
 set -eo pipefail
 
 VERSION="0.8.0"
 
 # Resolve this script's real location (following symlinks), then the keg/repo
-# root (bin/..), so `share/rigorish` is found whether run from Homebrew or source.
+# root (bin/..), so `share/rigor` is found whether run from Homebrew or source.
 _src="${BASH_SOURCE[0]}"
 while [ -h "$_src" ]; do
   _dir="$(cd -P "$(dirname "$_src")" && pwd)"
@@ -13,24 +13,27 @@ while [ -h "$_src" ]; do
   [[ "$_src" != /* ]] && _src="$_dir/$_src"
 done
 BIN_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
-SHARE="$(cd "$BIN_DIR/.." && pwd)/share/rigorish"
+SHARE="$(cd "$BIN_DIR/.." && pwd)/share/rigor"
 
-RC="${RIGORISH_RC:-${ZDOTDIR:-$HOME}/.zshrc}"
+# RIGOR_* is canonical; DEVRIG_* (pre-rename) and EZENV_* (pre-pre-rename) are
+# honored as deprecated fallbacks so an existing exported override doesn't
+# silently stop working.
+RC="${RIGOR_RC:-${DEVRIG_RC:-${EZENV_RC:-${ZDOTDIR:-$HOME}/.zshrc}}}"
 
 usage() {
   cat <<EOF
-rigorish $VERSION — opt-in dev environment helpers
+rigor $VERSION — opt-in dev environment helpers
 
 Usage:
-  rigorish enable [feature...]      Enable feature(s) (no feature = all)
-  rigorish disable <feature|all>    Disable a feature (or 'all'); a feature is required
-  rigorish status                   Show which features are enabled
-  rigorish doctor                   Show current environment (python/pip/venv)
-  rigorish init [feature...]        Print the raw source line(s) — for eval or manual use
-  rigorish sleep on|off|status      Toggle 'sudo pmset -a disablesleep' (needs sudo)
-  rigorish push <subcommand>        Agent turn notifications on your phone
-  rigorish version                  Print version
-  rigorish help                     Show this help
+  rigor enable [feature...]      Enable feature(s) (no feature = all)
+  rigor disable <feature|all>    Disable a feature (or 'all'); a feature is required
+  rigor status                   Show which features are enabled
+  rigor doctor                   Show current environment (python/pip/venv)
+  rigor init [feature...]        Print the raw source line(s) — for eval or manual use
+  rigor sleep on|off|status      Toggle 'sudo pmset -a disablesleep' (needs sudo)
+  rigor push <subcommand>        Agent turn notifications on your phone
+  rigor version                  Print version
+  rigor help                     Show this help
 
 Features:
   autovenv       Auto-activate the nearest .venv when you cd into a repo
@@ -38,8 +41,9 @@ Features:
   envup          Add an 'envup' command: export a .env into the current shell
   all            autovenv + pyf + envup (default when no feature is given)
 
-Per-directory git/ssh/GitHub accounts moved to gitplus — see 'git account'.
-Config written by 'devrig account' is still read there, so nothing to redo.
+Per-directory git/ssh/GitHub accounts moved to gitplus — see 'gp account'.
+Config written by 'devrig account' (or 'rigor account') is still read there,
+so nothing to redo.
 
 Push subcommands:
   push setup [--topic T] [--device NAME] [--server URL]   Wire this machine
@@ -48,10 +52,10 @@ Push subcommands:
   push off                        Unwire, restoring what was there before
 
 Example:
-  rigorish enable autovenv      # then: exec zsh
-  rigorish sleep off            # keep the Mac awake (e.g. a long build/transfer)
-  rigorish sleep on             # ...then put it back
-  rigorish push setup           # notify your phone when an agent turn ends
+  rigor enable autovenv      # then: exec zsh
+  rigor sleep off            # keep the Mac awake (e.g. a long build/transfer)
+  rigor sleep on             # ...then put it back
+  rigor push setup           # notify your phone when an agent turn ends
 EOF
 }
 
@@ -59,8 +63,8 @@ EOF
 # Homebrew opt path; fall back to the resolved location for source/dev runs.
 share_dir() {
   local p
-  if p="$(brew --prefix rigorish 2>/dev/null)" && [ -d "$p/share/rigorish" ]; then
-    echo "$p/share/rigorish"
+  if p="$(brew --prefix rigor 2>/dev/null)" && [ -d "$p/share/rigor" ]; then
+    echo "$p/share/rigor"
   else
     echo "$SHARE"
   fi
@@ -93,12 +97,18 @@ expand_features() {
   echo "$out"
 }
 
-# True if a feature is enabled in $RC. Recognizes the legacy feature name
-# 'py-fallback' so older rigorish configurations are detected as 'pyf'.
+# True if a feature is enabled in $RC. Recognizes the legacy 'py-fallback'
+# marker so an rc written by an older rigor/devrig is still detected as 'pyf',
+# and the pre-rename 'devrig:' and pre-pre-rename 'ezenv:' marker prefixes so
+# an rc from before either rename is still detected without a manual edit.
 feature_enabled() {
   [ -f "$RC" ] || return 1
-  grep -qF "# rigorish:$1" "$RC" && return 0
-  [ "$1" = pyf ] && grep -qF "# rigorish:py-fallback" "$RC" && return 0
+  grep -qF "# rigor:$1" "$RC" && return 0
+  grep -qF "# devrig:$1" "$RC" && return 0
+  grep -qF "# ezenv:$1" "$RC" && return 0
+  [ "$1" = pyf ] && grep -qF "# rigor:py-fallback" "$RC" && return 0
+  [ "$1" = pyf ] && grep -qF "# devrig:py-fallback" "$RC" && return 0
+  [ "$1" = pyf ] && grep -qF "# ezenv:py-fallback" "$RC" && return 0
   return 1
 }
 
@@ -107,7 +117,7 @@ feature_enabled() {
 # every new terminal, workspace-wide — which fights autovenv's directory-precise
 # model (it loads a venv even in dirs that have none). On `enable autovenv` we
 # offer to turn that off at the user level so autovenv owns venv activation;
-# `disable autovenv` offers to turn it back on. Edits are backed up (.rigorish-bak).
+# `disable autovenv` offers to turn it back on. Edits are backed up (.rigor-bak).
 _EDITOR_KEY='python.terminal.activateEnvironment'
 
 _editor_settings() {  # print settings.json path for each installed editor
@@ -126,10 +136,10 @@ _editor_set_false() {  # add "<key>": false as the first entry (JSONC-safe)
   if [ ! -s "$f" ]; then
     printf '{\n    "%s": false\n}\n' "$_EDITOR_KEY" > "$f"
   else
-    cp "$f" "$f.rigorish-bak"
+    cp "$f" "$f.rigor-bak"
     # Insert right after the first '{'. JSONC tolerates the trailing comma even
     # if this becomes the only key, so this is safe for compact or empty objects.
-    RIGORISH_KEY="$_EDITOR_KEY" perl -0pi -e 's/\{/\{\n    "$ENV{RIGORISH_KEY}": false,/' "$f"
+    RIGOR_KEY="$_EDITOR_KEY" perl -0pi -e 's/\{/\{\n    "$ENV{RIGOR_KEY}": false,/' "$f"
   fi
   echo "  ${f/#$HOME/~}: set $_EDITOR_KEY=false"
 }
@@ -164,9 +174,9 @@ _editor_restore() {  # disable autovenv → offer to undo the defer
   case "$ans" in
     y|Y|yes|YES)
       for f in "${todo[@]}"; do
-        cp "$f" "$f.rigorish-bak"
-        grep -Ev "$pat" "$f" > "$f.rigorish-tmp" || true
-        mv "$f.rigorish-tmp" "$f"
+        cp "$f" "$f.rigor-bak"
+        grep -Ev "$pat" "$f" > "$f.rigor-tmp" || true
+        mv "$f.rigor-tmp" "$f"
         echo "  ${f/#$HOME/~}: removed $_EDITOR_KEY=false"
       done ;;
     *) return 0 ;;
@@ -180,13 +190,13 @@ cmd_enable() {
   local changed=0 f file marker feats; feats="$(expand_features "$@")"
   for f in $feats; do
     if ! file="$(feature_file "$f")"; then
-      echo "rigorish: unknown feature '$f' (try: autovenv, pyf, envup, all)" >&2; continue
+      echo "rigor: unknown feature '$f' (try: autovenv, pyf, envup, all)" >&2; continue
     fi
     if feature_enabled "$f"; then
       echo "already enabled: $f"
       continue
     fi
-    marker="# rigorish:$f"
+    marker="# rigor:$f"
     printf 'source "%s/%s"  %s\n' "$sd" "$file" "$marker" >> "$RC"
     echo "enabled: $f"
     changed=1
@@ -199,26 +209,34 @@ cmd_enable() {
 }
 
 cmd_disable() {
-  # Require an explicit feature, so a bare `rigorish disable` can't wipe everything
-  # by accident. Use `rigorish disable all` to turn them all off.
+  # Require an explicit feature, so a bare `rigor disable` can't wipe everything
+  # by accident. Use `rigor disable all` to turn them all off.
   if [ "$#" -eq 0 ]; then
-    echo "rigorish: pick a feature to disable: autovenv, pyf, envup (or 'all')" >&2
+    echo "rigor: pick a feature to disable: autovenv, pyf, envup (or 'all')" >&2
     return 2
   fi
   [ -f "$RC" ] || { echo "nothing to do (no $RC)"; return 0; }
   local changed=0 f tmp shim feats; feats="$(expand_features "$@")"
   for f in $feats; do
     if feature_enabled "$f"; then
-      tmp="$(mktemp "${RC}.rigorish.XXXXXX")"
+      tmp="$(mktemp "${RC}.rigor.XXXXXX")"
       # Drop the feature's line(s); for pyf also drop the legacy py-fallback
-      # marker.
+      # marker. Also drop the pre-rename 'devrig:' and pre-pre-rename 'ezenv:'
+      # markers so a not-yet-migrated rc is fully cleaned in one pass, not
+      # left with a dangling old line.
       # `|| true`: grep exits 1 when it filters out the only line (empty
       # output), which must not abort the removal or trip `set -e`.
       if [ "$f" = pyf ]; then
-        grep -vF "# rigorish:pyf" "$RC" \
-          | grep -vF "# rigorish:py-fallback" > "$tmp" || true
+        grep -vF "# rigor:pyf" "$RC" \
+          | grep -vF "# rigor:py-fallback" \
+          | grep -vF "# devrig:pyf" \
+          | grep -vF "# devrig:py-fallback" \
+          | grep -vF "# ezenv:pyf" \
+          | grep -vF "# ezenv:py-fallback" > "$tmp" || true
       else
-        grep -vF "# rigorish:$f" "$RC" > "$tmp" || true
+        grep -vF "# rigor:$f" "$RC" \
+          | grep -vF "# devrig:$f" \
+          | grep -vF "# ezenv:$f" > "$tmp" || true
       fi
       mv "$tmp" "$RC"
       echo "disabled: $f"
@@ -226,10 +244,19 @@ cmd_disable() {
     else
       echo "not enabled: $f"
     fi
-    # Clean up pyf's shim dir so disable leaves nothing behind.
+    # Clean up pyf's shim dir so disable leaves nothing behind — the current
+    # path and both pre-rename ones, in case they were never migrated.
     if [ "$f" = pyf ]; then
-      shim="${RIGORISH_SHIM_DIR:-$HOME/.local/share/rigorish/shims}"
+      shim="${RIGOR_SHIM_DIR:-${DEVRIG_SHIM_DIR:-${EZENV_SHIM_DIR:-$HOME/.local/share/rigor/shims}}}"
       if [ -d "$shim" ]; then rm -rf "$shim"; echo "removed shims: $shim"; fi
+      if [ -z "${RIGOR_SHIM_DIR:-}${DEVRIG_SHIM_DIR:-}" ] && [ -d "$HOME/.local/share/devrig/shims" ]; then
+        rm -rf "$HOME/.local/share/devrig/shims"
+        echo "removed shims: ~/.local/share/devrig/shims"
+      fi
+      if [ -z "${RIGOR_SHIM_DIR:-}${DEVRIG_SHIM_DIR:-}${EZENV_SHIM_DIR:-}" ] && [ -d "$HOME/.local/share/ezenv/shims" ]; then
+        rm -rf "$HOME/.local/share/ezenv/shims"
+        echo "removed shims: ~/.local/share/ezenv/shims"
+      fi
     fi
   done
   # If we're turning autovenv off, offer to give the editor its venv activation
@@ -249,25 +276,25 @@ cmd_status() {
       echo "  $f : disabled"
     fi
   done
-  # Per-directory git/ssh/GitHub accounts used to live here as `rigorish
-  # account`. They moved to gitplus as `git account`, because every git-*
+  # Per-directory git/ssh/GitHub accounts used to live here as `devrig
+  # account`. They moved to gitplus as `gp account`, because every gp-*
   # command needs to resolve the bound account before calling gh — so the
   # registry belongs with the git tooling, not a shell-helper package.
-  # Existing config keeps working: `git account` reads the sentinels this
-  # wrote. Mentioned here rather than dropped silently, since `rigorish status`
+  # Existing config keeps working: `gp account` reads the sentinels this
+  # wrote. Mentioned here rather than dropped silently, since `rigor status`
   # used to list accounts and someone will wonder where they went.
-  if command -v git-account >/dev/null 2>&1 && [ -n "$(git-account list 2>/dev/null | head -1)" ]; then
-    echo "accounts: moved to gitplus — see 'git account list'"
+  if command -v gp-account >/dev/null 2>&1 && [ -n "$(gp-account list 2>/dev/null | head -1)" ]; then
+    echo "accounts: moved to gitplus — see 'gp account list'"
   fi
   # push is not an rc feature, so it has no line above. Reported anyway: it
-  # changes what your phone does, and `rigorish status` is where you look.
-  if [ -f "$PUSH_CLAUDE" ] && grep -q 'rigorish/push/claude-' "$PUSH_CLAUDE" 2>/dev/null; then
-    echo "  push : wired — see 'rigorish push status'"
+  # changes what your phone does, and `rigor status` is where you look.
+  if [ -f "$PUSH_CLAUDE" ] && grep -q 'rigor/push/claude-' "$PUSH_CLAUDE" 2>/dev/null; then
+    echo "  push : wired — see 'rigor push status'"
   fi
 }
 
 cmd_doctor() {
-  echo "rigorish $VERSION"
+  echo "rigor $VERSION"
   echo "share dir   : $(share_dir)"
   echo "python      : $(command -v python || echo '<not found>')"
   echo "python3     : $(command -v python3 || echo '<not found>')"
@@ -280,7 +307,7 @@ cmd_sleep() {
   case "${1:-}" in
     off)
       sudo pmset -a disablesleep 1
-      echo "sleep disabled — this Mac won't sleep until 'rigorish sleep on'"
+      echo "sleep disabled — this Mac won't sleep until 'rigor sleep on'"
       ;;
     on)
       sudo pmset -a disablesleep 0
@@ -290,13 +317,13 @@ cmd_sleep() {
       local v
       v="$(pmset -g | awk '/SleepDisabled/ {print $2}')"
       if [ "$v" = "1" ]; then
-        echo "sleep disabled (rigorish sleep on to re-enable)"
+        echo "sleep disabled (rigor sleep on to re-enable)"
       else
         echo "sleep enabled (normal)"
       fi
       ;;
     *)
-      echo "rigorish sleep: specify 'on', 'off', or 'status'" >&2
+      echo "rigor sleep: specify 'on', 'off', or 'status'" >&2
       return 1
       ;;
   esac
@@ -315,26 +342,27 @@ cmd_sleep() {
 # All JSON and TOML editing is done in perl with core JSON::PP, deliberately.
 # jq would be the obvious tool and is not a dependency of this package; making
 # it one for a single optional feature would tax every install.
-PUSH_ENV_DEFAULT="$HOME/.config/rigorish/push.env"
-PUSH_CLAUDE="${RIGORISH_PUSH_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
-PUSH_CODEX="${RIGORISH_PUSH_CODEX_CONF:-$HOME/.codex/config.toml}"
+PUSH_ENV_DEFAULT="$HOME/.config/rigor/push.env"
+PUSH_CLAUDE="${RIGOR_PUSH_CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+PUSH_CODEX="${RIGOR_PUSH_CODEX_CONF:-$HOME/.codex/config.toml}"
 
 push_dir() { echo "$(share_dir)/push"; }
 
 # Where config is read from: an explicit override, else the current location,
 # else the standalone installer's location that predated this feature.
 _push_conf_read() {
-  if [ -n "${RIGORISH_PUSH_ENV:-}" ]; then echo "$RIGORISH_PUSH_ENV"; return; fi
+  if [ -n "${RIGOR_PUSH_ENV:-}" ]; then echo "$RIGOR_PUSH_ENV"; return; fi
   if [ -r "$PUSH_ENV_DEFAULT" ]; then echo "$PUSH_ENV_DEFAULT"; return; fi
+  if [ -r "$HOME/.config/rigorish/push.env" ]; then echo "$HOME/.config/rigorish/push.env"; return; fi
   if [ -r "$HOME/.config/phone-push.env" ]; then echo "$HOME/.config/phone-push.env"; return; fi
   echo "$PUSH_ENV_DEFAULT"
 }
-_push_conf_write() { echo "${RIGORISH_PUSH_ENV:-$PUSH_ENV_DEFAULT}"; }
-_push_passthrough() { echo "$HOME/.config/rigorish/codex-passthrough"; }
+_push_conf_write() { echo "${RIGOR_PUSH_ENV:-$PUSH_ENV_DEFAULT}"; }
+_push_passthrough() { echo "$HOME/.config/rigor/codex-passthrough"; }
 
 _push_backup() {  # keep a copy beside the file, the same way autovenv does
   [ -f "$1" ] || return 0
-  cp "$1" "$1.rigorish-bak"
+  cp "$1" "$1.rigor-bak"
 }
 
 _push_load() {
@@ -344,8 +372,8 @@ _push_load() {
     . "$c" 2>/dev/null || true
   fi
   NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"
-  RIGORISH_PUSH_DEVICE="${RIGORISH_PUSH_DEVICE:-${PHONE_PUSH_DEVICE:-$(hostname -s 2>/dev/null || echo host)}}"
-  RIGORISH_PUSH_MIN_SECONDS="${RIGORISH_PUSH_MIN_SECONDS:-${PHONE_PUSH_MIN_SECONDS:-60}}"
+  RIGOR_PUSH_DEVICE="${RIGOR_PUSH_DEVICE:-${PHONE_PUSH_DEVICE:-$(hostname -s 2>/dev/null || echo host)}}"
+  RIGOR_PUSH_MIN_SECONDS="${RIGOR_PUSH_MIN_SECONDS:-${PHONE_PUSH_MIN_SECONDS:-60}}"
 }
 
 _push_setup() {
@@ -355,13 +383,13 @@ _push_setup() {
       --topic)  topic="${2:-}"; shift 2 ;;
       --device) device="${2:-}"; shift 2 ;;
       --server) server="${2:-}"; shift 2 ;;
-      *) echo "rigorish push setup: unknown option '$1'" >&2; return 2 ;;
+      *) echo "rigor push setup: unknown option '$1'" >&2; return 2 ;;
     esac
   done
 
   local pd; pd="$(push_dir)"
   if [ ! -x "$pd/send" ]; then
-    echo "rigorish push: helper scripts not found in $pd" >&2
+    echo "rigor push: helper scripts not found in $pd" >&2
     return 1
   fi
 
@@ -370,7 +398,7 @@ _push_setup() {
   _push_load
   [ -n "$topic" ]  && NTFY_TOPIC="$topic"
   [ -n "$server" ] && NTFY_SERVER="$server"
-  [ -n "$device" ] && RIGORISH_PUSH_DEVICE="$device"
+  [ -n "$device" ] && RIGOR_PUSH_DEVICE="$device"
   local fresh=0
   if [ -z "${NTFY_TOPIC:-}" ]; then
     local rand
@@ -382,17 +410,17 @@ _push_setup() {
   local cw; cw="$(_push_conf_write)"
   mkdir -p "$(dirname "$cw")"
   cat > "$cw" <<CONF
-# rigorish push — written by 'rigorish push setup'. Keep this file private:
+# rigor push — written by 'rigor push setup'. Keep this file private:
 # on public ntfy.sh the topic name is the only thing protecting the feed.
 NTFY_SERVER="$NTFY_SERVER"
 NTFY_TOPIC="$NTFY_TOPIC"
 # Shown in every notification title, so several machines stay distinguishable.
-RIGORISH_PUSH_DEVICE="$RIGORISH_PUSH_DEVICE"
+RIGOR_PUSH_DEVICE="$RIGOR_PUSH_DEVICE"
 # Turns shorter than this do not notify — you had not walked away yet.
-RIGORISH_PUSH_MIN_SECONDS=$RIGORISH_PUSH_MIN_SECONDS
+RIGOR_PUSH_MIN_SECONDS=$RIGOR_PUSH_MIN_SECONDS
 CONF
   chmod 600 "$cw"
-  echo "config    : ${cw/#$HOME/~}  (device \"$RIGORISH_PUSH_DEVICE\")"
+  echo "config    : ${cw/#$HOME/~}  (device \"$RIGOR_PUSH_DEVICE\")"
 
   # Claude Code: three hooks. UserPromptSubmit stamps the turn start, Stop
   # pushes only past the threshold, Notification pushes whenever Claude is
@@ -424,9 +452,9 @@ CONF
   echo
   echo "Subscribe your phone to topic '$NTFY_TOPIC' at $NTFY_SERVER (ntfy app)."
   if [ "$fresh" = 1 ]; then
-    echo "On your other machines:  rigorish push setup --topic $NTFY_TOPIC"
+    echo "On your other machines:  rigor push setup --topic $NTFY_TOPIC"
   fi
-  echo "Then check it end to end:  rigorish push test"
+  echo "Then check it end to end:  rigor push test"
 }
 
 _push_status() {
@@ -435,7 +463,7 @@ _push_status() {
   _push_load
   local c; c="$(_push_conf_read)"
   if [ ! -r "$c" ] || [ -z "${NTFY_TOPIC:-}" ]; then
-    echo "not set up — run: rigorish push setup"
+    echo "not set up — run: rigor push setup"
     return 0
   fi
   echo "config    : ${c/#$HOME/~}"
@@ -450,9 +478,9 @@ _push_status() {
     echo "topic     : ${NTFY_TOPIC:0:$keep}$(printf '%*s' "$pad" '' | tr ' ' '*')  (--show to reveal)"
   fi
   echo "server    : $NTFY_SERVER"
-  echo "device    : $RIGORISH_PUSH_DEVICE"
-  echo "quiet under: ${RIGORISH_PUSH_MIN_SECONDS}s"
-  if [ -f "$PUSH_CLAUDE" ] && grep -q 'rigorish/push/claude-' "$PUSH_CLAUDE" 2>/dev/null; then
+  echo "device    : $RIGOR_PUSH_DEVICE"
+  echo "quiet under: ${RIGOR_PUSH_MIN_SECONDS}s"
+  if [ -f "$PUSH_CLAUDE" ] && grep -q 'rigor/push/claude-' "$PUSH_CLAUDE" 2>/dev/null; then
     echo "claude    : wired"
   else
     echo "claude    : not wired"
@@ -477,11 +505,11 @@ _push_status() {
 _push_test() {
   _push_load
   if [ -z "${NTFY_TOPIC:-}" ]; then
-    echo "not set up — run: rigorish push setup" >&2
+    echo "not set up — run: rigor push setup" >&2
     return 1
   fi
-  local msg="${*:-rigorish push test}"
-  "$(push_dir)/send" "rigorish" "$msg" default bell
+  local msg="${*:-rigor push test}"
+  "$(push_dir)/send" "rigor" "$msg" default bell
   sleep 2
   if curl -fsS --max-time 15 "${NTFY_SERVER%/}/${NTFY_TOPIC}/json?poll=1&since=1m" 2>/dev/null \
        | grep -qF "$msg"; then
@@ -520,12 +548,12 @@ cmd_push() {
     off)    _push_off ;;
     *)
       cat >&2 <<'EOF'
-rigorish push: specify a subcommand
+rigor push: specify a subcommand
 
-  rigorish push setup [--topic T] [--device NAME] [--server URL]
-  rigorish push status [--show]
-  rigorish push test [message]
-  rigorish push off
+  rigor push setup [--topic T] [--device NAME] [--server URL]
+  rigor push status [--show]
+  rigor push test [message]
+  rigor push off
 
 Notifies your phone when a Claude Code or Codex turn ends, via ntfy.
 EOF
@@ -538,7 +566,7 @@ cmd_init() {
   local f file
   for f in $(expand_features "$@"); do
     if ! file="$(feature_file "$f")"; then
-      echo "rigorish: unknown feature '$f' (try: autovenv, pyf, envup, all)" >&2; return 1
+      echo "rigor: unknown feature '$f' (try: autovenv, pyf, envup, all)" >&2; return 1
     fi
     printf 'source "%s/%s"\n' "$sd" "$file"
   done
@@ -555,12 +583,12 @@ case "${1:-help}" in
   # usage dump. Forwards the arguments so the suggestion is runnable as-is.
   account|accounts)
     shift
-    echo "rigorish: accounts moved to gitplus — run: git account${*:+ $*}" >&2
+    echo "rigor: accounts moved to gitplus — run: gp account${*:+ $*}" >&2
     echo "  (your existing accounts and bindings still work there, unchanged)" >&2
     exit 1 ;;
   sleep)                shift; cmd_sleep "$@" ;;
   push)                 shift; cmd_push "$@" ;;
-  version|--version|-v) echo "rigorish $VERSION" ;;
+  version|--version|-v) echo "rigor $VERSION" ;;
   help|--help|-h)       usage ;;
   *)                    usage >&2; exit 1 ;;
 esac

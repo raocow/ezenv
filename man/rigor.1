@@ -1,12 +1,12 @@
-.TH RIGORISH 1 "2026" "rigorish 0.8.0" "User Commands"
+.TH RIGOR 1 "2026" "rigor 0.8.0" "User Commands"
 .SH NAME
-rigorish \- opt-in dev environment helpers
+rigor \- opt-in dev environment helpers
 .SH SYNOPSIS
-.B rigorish
+.B rigor
 .I command
 .RI [ feature ...]
 .SH DESCRIPTION
-.B rigorish
+.B rigor
 bundles small, independently enabled zsh helpers. Each feature is a script
 you source from your
 .IR ~/.zshrc ;
@@ -79,14 +79,14 @@ unwires and restores what was there before. Both
 and
 .B off
 back up every file they edit
-.RB ( .rigorish-bak )
+.RB ( .rigor-bak )
 and are safe to re-run. Claude Code notifies at the end of a turn and whenever
 it is blocked on you; Codex notifies at the end of a turn. Turns shorter than
-.B RIGORISH_PUSH_MIN_SECONDS
+.B RIGOR_PUSH_MIN_SECONDS
 stay quiet. Codex permits a single
 .B notify
 program, so if one is already configured \(em the ChatGPT desktop app installs
-its own \(em rigorish parks that command and replays it before pushing, and
+its own \(em rigor parks that command and replays it before pushing, and
 .B off
 hands the slot back.
 .TP
@@ -94,24 +94,32 @@ hands the slot back.
 Print the version.
 .SH ENVIRONMENT
 .TP
-.B RIGORISH_RC
+.B RIGOR_RC
 Override the rc file that enable/disable edit (default
 .IR ~/.zshrc ).
+.B DEVRIG_RC
+and
+.B EZENV_RC
+are honored as deprecated fallbacks from earlier names of this tool.
 .TP
-.B RIGORISH_SHIM_DIR
+.B RIGOR_SHIM_DIR
 Override where pyf writes its python/pip shims.
+.B DEVRIG_SHIM_DIR
+and
+.B EZENV_SHIM_DIR
+are honored as deprecated fallbacks.
 .TP
-.B RIGORISH_PUSH_ENV
+.B RIGOR_PUSH_ENV
 Override the push config file (default
-.IR ~/.config/rigorish/push.env ).
+.IR ~/.config/rigor/push.env ).
 .TP
-.B RIGORISH_PUSH_CLAUDE_SETTINGS
+.B RIGOR_PUSH_CLAUDE_SETTINGS
 Override the Claude Code settings file that
 .B push
 edits (default
 .IR ~/.claude/settings.json ).
 .TP
-.B RIGORISH_PUSH_CODEX_CONF
+.B RIGOR_PUSH_CODEX_CONF
 Override the Codex config file that
 .B push
 edits (default
@@ -126,14 +134,14 @@ The current directory wins: leaving every
 .I .venv
 scope deactivates whatever is active, including a venv activated by your editor.
 On
-.BR "rigorish enable autovenv" ,
+.BR "rigor enable autovenv" ,
 it offers (with a prompt) to disable VSCode/Cursor's own terminal venv
 auto-activation
 .RB ( python.terminal.activateEnvironment )
 in your user settings, so autovenv is the sole venv manager;
-.B "rigorish disable autovenv"
+.B "rigor disable autovenv"
 offers to undo it. Those edits are backed up alongside the file
-.RB ( .rigorish-bak ).
+.RB ( .rigor-bak ).
 .TP
 .B pyf
 Create shims so bare
@@ -154,8 +162,8 @@ loads
 .B "envup FILE"
 a specific one. Shorthand for
 .BR "set -a; source <file>; set +a" .
-It is a sourced function rather than an
-.B rigorish
+It is a sourced function rather than a
+.B rigor
 subcommand because a subprocess cannot export variables back into your shell.
 Named
 .B envup
@@ -164,15 +172,15 @@ rather than
 to avoid shadowing the python-dotenv CLI.
 .SH FILES
 .TP
-.I <prefix>/share/rigorish/*.zsh
+.I <prefix>/share/rigor/*.zsh
 The feature scripts you source.
 .TP
-.I <prefix>/share/rigorish/push/
+.I <prefix>/share/rigor/push/
 The notification transport and the agent hook scripts that
 .B push
 points Claude Code and Codex at.
 .TP
-.I ~/.config/rigorish/push.env
+.I ~/.config/rigor/push.env
 Push config, mode 600. On public ntfy.sh the topic name in it is the only thing
 protecting the feed.
 .SH EXAMPLES
@@ -180,9 +188,9 @@ Enable features, then reload the shell to apply:
 .PP
 .nf
 .RS
-rigorish enable autovenv       # per-repo .venv auto-activation
-rigorish enable pyf            # bare python/pip -> python3/pip3
-rigorish enable                # everything
+rigor enable autovenv       # per-repo .venv auto-activation
+rigor enable pyf            # bare python/pip -> python3/pip3
+rigor enable                # everything
 exec zsh                    # apply to the current shell
 .RE
 .fi
@@ -191,8 +199,8 @@ Check and undo:
 .PP
 .nf
 .RS
-rigorish status                # what's enabled
-rigorish disable pyf           # turn one off
+rigor status                # what's enabled
+rigor disable pyf           # turn one off
 .RE
 .fi
 .PP
@@ -202,8 +210,8 @@ edit):
 .PP
 .nf
 .RS
-source "$(brew --prefix)/share/rigorish/autovenv.zsh"
-source "$(brew --prefix)/share/rigorish/pyf.zsh"
+source "$(brew --prefix)/share/rigor/autovenv.zsh"
+source "$(brew --prefix)/share/rigor/pyf.zsh"
 .RE
 .fi
 .PP
@@ -211,9 +219,9 @@ Notify your phone when an agent turn ends, on this machine and then a second one
 .PP
 .nf
 .RS
-rigorish push setup                       # prints the topic to subscribe to
-rigorish push test                        # confirm it arrives
-rigorish push setup --topic TOPIC --device mini   # on the next machine
+rigor push setup                       # prints the topic to subscribe to
+rigor push test                        # confirm it arrives
+rigor push setup --topic TOPIC --device mini   # on the next machine
 .RE
 .fi
 .SH SEE ALSO

@@ -1,4 +1,4 @@
-# rigorish: auto-activate the nearest .venv when you cd into a project.
+# rigor: auto-activate the nearest .venv when you cd into a project.
 #
 # The current directory is the source of truth: cd into a tree that contains
 # a .venv and it activates; leave every .venv scope and whatever is active is
@@ -6,11 +6,11 @@
 # your editor). So the venv that's live always matches where you are.
 #
 # Enable by adding to ~/.zshrc:
-#   source "$(brew --prefix)/share/rigorish/autovenv.zsh"
+#   source "$(brew --prefix)/share/rigor/autovenv.zsh"
 
 autoload -U add-zsh-hook 2>/dev/null
 
-_rigorish_autovenv() {
+_rigor_autovenv() {
   # Walk up from $PWD looking for the nearest .venv/bin/activate.
   local d="$PWD" venv=""
   while [[ -n "$d" ]]; do
@@ -31,5 +31,5 @@ _rigorish_autovenv() {
   fi
 }
 
-add-zsh-hook chpwd _rigorish_autovenv
-_rigorish_autovenv  # run once for the current directory
+add-zsh-hook chpwd _rigor_autovenv
+_rigor_autovenv  # run once for the current directory

@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# rigorish push: add or remove the Claude Code hooks in settings.json.
+# rigor push: add or remove the Claude Code hooks in settings.json.
 #
 #   wire-claude on  <push-dir> <settings.json>
 #   wire-claude off             <settings.json>
@@ -28,15 +28,16 @@ if (-s $path) {
 }
 
 # An entry is ours if any command in it points at this feature's scripts. The
-# standalone installer that predated the feature used phone-push-*.sh names, so
-# those are claimed too and a migrating machine ends up with one copy, not two.
+# standalone installer that predated the feature used phone-push-*.sh names, and
+# the retracted 'rigorish' rename used rigorish/push/claude-* — both are claimed
+# too, so a migrating machine ends up with one copy, not two or three.
 sub ours {
   my ($entry) = @_;
   return 0 unless ref $entry eq 'HASH' && ref $entry->{hooks} eq 'ARRAY';
   for my $h (@{ $entry->{hooks} }) {
     next unless ref $h eq 'HASH';
     my $c = $h->{command} // '';
-    return 1 if $c =~ m{rigorish/push/claude-} || $c =~ m{phone-push-};
+    return 1 if $c =~ m{rigor/push/claude-} || $c =~ m{rigorish/push/claude-} || $c =~ m{phone-push-};
   }
   return 0;
 }
@@ -72,7 +73,7 @@ if ($mode eq 'on') {
 
 if (%$hooks) { $data->{hooks} = $hooks } else { delete $data->{hooks} }
 
-open my $out, '>', "$path.rigorish-tmp" or die "wire-claude: cannot write $path: $!\n";
+open my $out, '>', "$path.rigor-tmp" or die "wire-claude: cannot write $path: $!\n";
 print $out $json->encode($data);
 close $out;
-rename "$path.rigorish-tmp", $path or die "wire-claude: cannot replace $path: $!\n";
+rename "$path.rigor-tmp", $path or die "wire-claude: cannot replace $path: $!\n";

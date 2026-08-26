@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Codex `notify` hook. Replays whatever notifier was configured before rigorish
+# Codex `notify` hook. Replays whatever notifier was configured before rigor
 # took the slot — on a Mac with the ChatGPT app that is its desktop notifier,
 # which would otherwise go silent — then forwards the turn to the phone.
 #

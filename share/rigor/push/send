@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rigorish push transport — one notification to the phone via ntfy.
+# rigor push transport — one notification to the phone via ntfy.
 # Usage: send <title> <message> [priority] [tags]
 #
 # Always exits 0. This runs from agent hooks, and a notifier that fails must
@@ -13,7 +13,7 @@ push_load || exit 0
 # multi-line body sails through whole and can cross ntfy's 4096-byte limit,
 # where the push fails and curl -f hides it. iconv -c drops the partial
 # character that a byte-cut can leave behind.
-title="$(printf '%s @ %s' "${1:-Agent}" "$RIGORISH_PUSH_DEVICE" \
+title="$(printf '%s @ %s' "${1:-Agent}" "$RIGOR_PUSH_DEVICE" \
   | tr -d '\r\n' | head -c 100 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)"
 
 # --data-binary @- rather than passing the body as an argument: curl reads a

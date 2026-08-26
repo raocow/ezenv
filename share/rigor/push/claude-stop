@@ -18,11 +18,11 @@ IFS=$'\t' read -r sid cwd transcript <<<"$(printf '%s' "$input" | /usr/bin/perl 
                        $d->{cwd} // "", $d->{transcript_path} // "";' 2>/dev/null)"
 [ -n "${sid:-}" ] || sid=unknown
 
-dir="${TMPDIR:-/tmp}/rigorish-push"
+dir="${TMPDIR:-/tmp}/rigor-push"
 start="$(cat "$dir/$sid" 2>/dev/null || echo 0)"
 rm -f "$dir/$sid" 2>/dev/null || true
 case "$start" in ''|*[!0-9]*) start=0 ;; esac
-if [ "$start" -gt 0 ] && [ "$(( $(date +%s) - start ))" -lt "$RIGORISH_PUSH_MIN_SECONDS" ]; then
+if [ "$start" -gt 0 ] && [ "$(( $(date +%s) - start ))" -lt "$RIGOR_PUSH_MIN_SECONDS" ]; then
   exit 0
 fi
 

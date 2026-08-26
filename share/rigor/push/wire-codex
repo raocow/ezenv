@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# rigorish push: take over, or hand back, the Codex `notify` slot.
+# rigor push: take over, or hand back, the Codex `notify` slot.
 #
 #   wire-codex on  <wrapper> <config.toml> <passthrough>
 #   wire-codex off           <config.toml> <passthrough>
@@ -73,8 +73,8 @@ if ($mode eq 'on') {
   }
 }
 
-open my $out, '>', "$conf.rigorish-tmp" or die "wire-codex: cannot write $conf: $!\n";
+open my $out, '>', "$conf.rigor-tmp" or die "wire-codex: cannot write $conf: $!\n";
 print $out @lines;
 close $out;
-rename "$conf.rigorish-tmp", $conf or die "wire-codex: cannot replace $conf: $!\n";
+rename "$conf.rigor-tmp", $conf or die "wire-codex: cannot replace $conf: $!\n";
 print "$report\n";

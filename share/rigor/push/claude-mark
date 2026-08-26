@@ -6,7 +6,7 @@ sid="$(/usr/bin/perl -MJSON::PP -e '
   local $/; my $d = eval { decode_json(<STDIN>) } || {};
   print $d->{session_id} // "unknown";' 2>/dev/null || echo unknown)"
 [ -n "$sid" ] || sid=unknown
-dir="${TMPDIR:-/tmp}/rigorish-push"
+dir="${TMPDIR:-/tmp}/rigor-push"
 mkdir -p "$dir" 2>/dev/null || true
 date +%s > "$dir/$sid" 2>/dev/null || true
 exit 0
