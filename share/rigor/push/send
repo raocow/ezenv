@@ -8,13 +8,23 @@ set -uo pipefail
 . "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 push_load || exit 0
 
-# ntfy carries the title in an HTTP header, so it has to be one line.
+# The phone truncates a notification title to about one line, so what goes in
+# it is ordered most-identifying first: the caller passes "<project> · <agent>"
+# and the device is appended last, where it is the first thing to be cut. Set
+# RIGOR_PUSH_DEVICE empty to drop it entirely, which is the right call when you
+# only run one machine and the suffix is pure overhead.
+title="${1:-Agent}"
+[ -n "$RIGOR_PUSH_DEVICE" ] && title="$title @ $RIGOR_PUSH_DEVICE"
+
+# ntfy carries the title in an HTTP header, so it has to be one line. There is
+# no documented server-side title limit; 200 is a sanity bound on the header,
+# far above anything a phone will display.
 # head -c and not cut -c throughout: cut caps each line separately, so a
 # multi-line body sails through whole and can cross ntfy's 4096-byte limit,
 # where the push fails and curl -f hides it. iconv -c drops the partial
 # character that a byte-cut can leave behind.
-title="$(printf '%s @ %s' "${1:-Agent}" "$RIGOR_PUSH_DEVICE" \
-  | tr -d '\r\n' | head -c 100 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)"
+title="$(printf '%s' "$title" \
+  | tr -d '\r\n' | head -c 200 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null)"
 
 # --data-binary @- rather than passing the body as an argument: curl reads a
 # FILE when the value starts with '@', so a message opening with one would
