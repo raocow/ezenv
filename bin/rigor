@@ -47,6 +47,7 @@ so nothing to redo.
 
 Push subcommands:
   push setup [--topic T] [--device NAME] [--server URL]   Wire this machine
+                                  (--device '' leaves the machine out of titles)
   push status [--show]            What is wired, and where
   push test [message]             Send one notification and read it back
   push off                        Unwire, restoring what was there before
@@ -372,16 +373,22 @@ _push_load() {
     . "$c" 2>/dev/null || true
   fi
   NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"
-  RIGOR_PUSH_DEVICE="${RIGOR_PUSH_DEVICE:-${PHONE_PUSH_DEVICE:-$(hostname -s 2>/dev/null || echo host)}}"
+  # ${x+set} and not ${x:-}: an empty RIGOR_PUSH_DEVICE is a deliberate "leave
+  # the device out of the title", and must not be refilled with the hostname.
+  if [ -z "${RIGOR_PUSH_DEVICE+set}" ]; then
+    RIGOR_PUSH_DEVICE="${PHONE_PUSH_DEVICE-$(hostname -s 2>/dev/null || echo host)}"
+  fi
   RIGOR_PUSH_MIN_SECONDS="${RIGOR_PUSH_MIN_SECONDS:-${PHONE_PUSH_MIN_SECONDS:-60}}"
 }
 
 _push_setup() {
-  local topic="" device="" server=""
+  local topic="" device="" server="" device_set=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --topic)  topic="${2:-}"; shift 2 ;;
-      --device) device="${2:-}"; shift 2 ;;
+      # device_set, so that --device '' is honored as "drop it from the title"
+      # rather than read as "no --device given".
+      --device) device="${2:-}"; device_set=1; shift 2 ;;
       --server) server="${2:-}"; shift 2 ;;
       *) echo "rigor push setup: unknown option '$1'" >&2; return 2 ;;
     esac
@@ -398,7 +405,7 @@ _push_setup() {
   _push_load
   [ -n "$topic" ]  && NTFY_TOPIC="$topic"
   [ -n "$server" ] && NTFY_SERVER="$server"
-  [ -n "$device" ] && RIGOR_PUSH_DEVICE="$device"
+  [ "$device_set" = 1 ] && RIGOR_PUSH_DEVICE="$device"
   local fresh=0
   if [ -z "${NTFY_TOPIC:-}" ]; then
     local rand
@@ -420,7 +427,11 @@ RIGOR_PUSH_DEVICE="$RIGOR_PUSH_DEVICE"
 RIGOR_PUSH_MIN_SECONDS=$RIGOR_PUSH_MIN_SECONDS
 CONF
   chmod 600 "$cw"
-  echo "config    : ${cw/#$HOME/~}  (device \"$RIGOR_PUSH_DEVICE\")"
+  if [ -n "$RIGOR_PUSH_DEVICE" ]; then
+    echo "config    : ${cw/#$HOME/~}  (device \"$RIGOR_PUSH_DEVICE\")"
+  else
+    echo "config    : ${cw/#$HOME/~}  (no device in the title)"
+  fi
 
   # Claude Code: three hooks. UserPromptSubmit stamps the turn start, Stop
   # pushes only past the threshold, Notification pushes whenever Claude is
@@ -478,7 +489,11 @@ _push_status() {
     echo "topic     : ${NTFY_TOPIC:0:$keep}$(printf '%*s' "$pad" '' | tr ' ' '*')  (--show to reveal)"
   fi
   echo "server    : $NTFY_SERVER"
-  echo "device    : $RIGOR_PUSH_DEVICE"
+  if [ -n "$RIGOR_PUSH_DEVICE" ]; then
+    echo "device    : $RIGOR_PUSH_DEVICE"
+  else
+    echo "device    : (not shown in titles)"
+  fi
   echo "quiet under: ${RIGOR_PUSH_MIN_SECONDS}s"
   if [ -f "$PUSH_CLAUDE" ] && grep -q 'rigor/push/claude-' "$PUSH_CLAUDE" 2>/dev/null; then
     echo "claude    : wired"
@@ -551,6 +566,7 @@ cmd_push() {
 rigor push: specify a subcommand
 
   rigor push setup [--topic T] [--device NAME] [--server URL]
+      --device '' leaves this machine out of the notification titles
   rigor push status [--show]
   rigor push test [message]
   rigor push off

@@ -27,5 +27,5 @@ msg="$(printf '%s' "${*: -1}" | /usr/bin/perl -MJSON::PP -e '
         // $d->{message} // "";' 2>/dev/null || true)"
 [ -n "$msg" ] || msg="Turn ended."
 
-"$HERE/send" "Codex — $(basename "$PWD")" "$msg" default robot || true
+"$HERE/send" "$(basename "$PWD") · Codex" "$msg" default robot || true
 exit 0

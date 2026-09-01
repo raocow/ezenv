@@ -14,7 +14,7 @@ IFS=$'\t' read -r msg cwd <<<"$(printf '%s' "$input" | /usr/bin/perl -MJSON::PP 
   $m =~ s/[\t\r\n]+/ /g;
   printf "%s\t%s", $m, $d->{cwd} // "";' 2>/dev/null)"
 [ -n "${msg:-}" ] || msg="Claude Code needs you."
-label="Claude Code"
-[ -n "${cwd:-}" ] && label="Claude Code — $(basename "$cwd")"
+label="Claude"
+[ -n "${cwd:-}" ] && label="$(basename "$cwd") · Claude"
 "$HERE/send" "$label" "$msg" high bell || true
 exit 0

@@ -83,9 +83,16 @@ covers all of them:
 rigor push setup --topic <the-topic> --device work-mini
 ```
 
-Every notification is titled with the project and the machine
-(`Claude Code — myrepo @ work-mini`), so several machines stay legible in one
-feed. Claude Code notifies when a turn ends **and** whenever it is blocked
+Every notification is titled with the project, the agent, and the machine
+(`myrepo · Claude @ work-mini`), in that order. A phone truncates a title to
+about one line, so the project comes first, where it survives the cut, and the
+machine last. If you only run one machine the suffix is pure overhead — drop it
+and get the width back:
+
+```bash
+rigor push setup --device ''      # titles become: myrepo · Claude
+```
+ Claude Code notifies when a turn ends **and** whenever it is blocked
 waiting on you; Codex notifies when a turn ends. Turns shorter than 60 seconds
 stay quiet, on the theory that you had not walked away yet
 (`RIGOR_PUSH_MIN_SECONDS` in `~/.config/rigor/push.env`).

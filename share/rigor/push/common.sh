@@ -26,7 +26,11 @@ push_load() {
   # shellcheck disable=SC1090
   . "$c" 2>/dev/null || return 1
   NTFY_SERVER="${NTFY_SERVER:-https://ntfy.sh}"
-  RIGOR_PUSH_DEVICE="${RIGOR_PUSH_DEVICE:-${PHONE_PUSH_DEVICE:-$(hostname -s 2>/dev/null || echo host)}}"
+  # ${x+set} and not ${x:-}: an empty RIGOR_PUSH_DEVICE is a deliberate "leave
+  # the device out of the title", and must not be refilled with the hostname.
+  if [ -z "${RIGOR_PUSH_DEVICE+set}" ]; then
+    RIGOR_PUSH_DEVICE="${PHONE_PUSH_DEVICE-$(hostname -s 2>/dev/null || echo host)}"
+  fi
   RIGOR_PUSH_MIN_SECONDS="${RIGOR_PUSH_MIN_SECONDS:-${PHONE_PUSH_MIN_SECONDS:-60}}"
   [ -n "${NTFY_TOPIC:-}" ]
 }

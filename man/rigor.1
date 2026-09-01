@@ -65,7 +65,10 @@ wires this machine and prints the topic to subscribe to; pass
 .B \-\-topic
 to join the topic your other machines already use,
 .B \-\-device
-to label this one, and
+to label this one \(em or
+.B \-\-device
+with an empty string to leave this machine out of the notification titles
+altogether, which is worth doing when you only run one \(em and
 .B \-\-server
 to use your own ntfy instance.
 .B status
@@ -83,7 +86,10 @@ back up every file they edit
 and are safe to re-run. Claude Code notifies at the end of a turn and whenever
 it is blocked on you; Codex notifies at the end of a turn. Turns shorter than
 .B RIGOR_PUSH_MIN_SECONDS
-stay quiet. Codex permits a single
+stay quiet. Titles read
+.IR "project \(bu agent @ machine" ,
+most-identifying part first, because a phone truncates a title to roughly one
+line and the project is the part worth keeping. Codex permits a single
 .B notify
 program, so if one is already configured \(em the ChatGPT desktop app installs
 its own \(em rigor parks that command and replays it before pushing, and

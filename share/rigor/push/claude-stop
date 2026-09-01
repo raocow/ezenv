@@ -42,7 +42,9 @@ if [ -n "${transcript:-}" ] && [ -r "$transcript" ]; then
 fi
 [ -n "$msg" ] || msg="Turn finished."
 
-label="Claude Code"
-[ -n "${cwd:-}" ] && label="Claude Code — $(basename "$cwd")"
+# Project first: it is the part that tells you which task finished, so it has
+# to survive the phone's truncation. The agent name follows, the device after.
+label="Claude"
+[ -n "${cwd:-}" ] && label="$(basename "$cwd") · Claude"
 "$HERE/send" "$label" "$msg" default white_check_mark || true
 exit 0
